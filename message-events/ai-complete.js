@@ -31,7 +31,7 @@ module.exports = {
 			}
 			if (searchQuery != '') {
 				console.log('search query: ' + searchQuery.join('+'));
-				const response = await openai.createCompletion('text-davinci-001', {
+				const response = await openai.createCompletion('text-babbage-001', {
 					prompt: searchQuery.join(' '),
 					temperature: 0.4,
 					max_tokens: 100,
