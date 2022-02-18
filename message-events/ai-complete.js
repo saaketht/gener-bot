@@ -33,7 +33,7 @@ module.exports = {
 				console.log('search query: ' + searchQuery.join('+'));
 				const response = await openai.createCompletion('text-babbage-001', {
 					prompt: searchQuery.join(' '),
-					temperature: 0.4,
+					temperature: 0.9,
 					max_tokens: 100,
 					top_p: 1,
 					frequency_penalty: 0,
