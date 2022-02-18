@@ -1,7 +1,6 @@
 // api via rapidapi
 const axios = require('axios').default;
 const { xRapidApiKey } = process.env.rapidApiKey; // require('./config.json');
-console.log(typeof('xRapidApiKey'));
 const searchCommand = 'imagesearch';
 module.exports = {
 	name: 'imagesearch',
