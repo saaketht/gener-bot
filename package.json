@@ -4,6 +4,7 @@
   "description": "generbot 1",
   "main": "index.js",
   "scripts": {
+    "worker": "npm start",
     "test": "nodemon index.js",
     "start": "node index.js"
   },
@@ -20,6 +21,7 @@
     "discord-api-types": "^0.27.1",
     "discord.js": "^13.6.0",
     "dotenv": "^16.0.0",
+    "http": "^0.0.1-security",
     "node-fetch": "^2.6.7",
     "node-libcurl": "^2.3.4",
     "openai": "^2.0.2",

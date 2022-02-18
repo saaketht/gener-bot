@@ -1,4 +1,5 @@
 // Require the necessary discord.js classes
+
 const fs = require('fs');
 require('dotenv').config();
 const { Client, Collection, Intents } = require('discord.js');
