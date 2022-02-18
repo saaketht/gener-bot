@@ -1,11 +1,18 @@
 // Require the necessary discord.js classes
 const fs = require('fs');
+// import environment variables
 require('dotenv').config();
+// import required elements
 const { Client, Collection, Intents } = require('discord.js');
 const token = process.env.token;
 // require('./config.json');
 const myIntents = new Intents();
 myIntents.add(Intents.FLAGS.GUILDS, Intents.FLAGS.GUILD_MESSAGES, Intents.FLAGS.GUILD_MESSAGE_TYPING);
+
+const PORT = process.env.PORT || 6565;
+app.listen(PORT, () => {
+	console.log(`Server listening on ${PORT}`);
+});
 
 // Create a new client instance
 const client = new Client({ intents: myIntents });
