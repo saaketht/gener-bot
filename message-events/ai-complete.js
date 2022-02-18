@@ -1,7 +1,7 @@
 require('dotenv').config();
-const { clientId } = process.env.privilegedIds;
+const clientId = process.env.privilegedIds;
 // require('../config.json');
-const { openAiApiKey } = process.env.openAiKey;
+const openAiApiKey = process.env.openAiKey;
 // require('./config.json');
 const { Configuration, OpenAIApi } = require('openai');
 const searchCommand = 'ai-complete';
@@ -39,7 +39,7 @@ module.exports = {
 					frequency_penalty: 0,
 					presence_penalty: 0,
 				});
-				// console.log(response);
+				console.log(response.data.choices[0].text);
 				await message.reply(response.data.choices[0].text);
 			}
 		}

@@ -2,7 +2,7 @@
 const fs = require('fs');
 require('dotenv').config();
 const { Client, Collection, Intents } = require('discord.js');
-const { token } = process.env.token;
+const token = process.env.token;
 // require('./config.json');
 const myIntents = new Intents();
 myIntents.add(Intents.FLAGS.GUILDS, Intents.FLAGS.GUILD_MESSAGES, Intents.FLAGS.GUILD_MESSAGE_TYPING);
