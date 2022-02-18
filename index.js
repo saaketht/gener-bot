@@ -17,8 +17,8 @@ const client = new Client({ intents: myIntents });
 const PORT = process.env.PORT || 6565;
 http.createServer(function(req, res) {
 	res.writeHead(200, { 'Content-Type': 'text/plain' });
-	res.write('🐒🦍🦧🦍🦧🦍🐒🦍🦧🦍🦧🦍🐒🦍🦧🦍🦧🦍🐒\n');
-	res.write('generBot is up and running @ port ${PORT}!\n');
+	res.write('|||||||||||||||||||||||||||||||||||||||||||||||||\n');
+	res.write('generBot is up and running!\n');
 	res.write('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~');
 	res.end();
 }).listen(PORT);
