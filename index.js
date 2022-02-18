@@ -18,6 +18,7 @@ const PORT = process.env.PORT || 6565;
 http.createServer(function(req, res) {
 	res.end();
 }).listen(PORT);
+console.log(`Server listening on ${PORT}`);
 
 // read in command files
 client.commands = new Collection();
