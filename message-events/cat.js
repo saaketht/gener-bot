@@ -8,7 +8,8 @@ module.exports = {
 		if (command.includes('cat')) {
 			console.log(command.split(' '));
 			const { file } = await fetch('https://aws.random.cat/meow').then(response => response.json());
-			message.reply({ files: [file] });
+			console.log(file);
+			message.reply(file);
 		}
 	},
 };

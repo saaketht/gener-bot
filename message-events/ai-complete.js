@@ -9,11 +9,11 @@ module.exports = {
 	name: 'ai-complete',
 	async execute(message) {
 		if (message.author.bot) return;
-		console.log (message.author.username);
 		const command = message.content.toLowerCase().split(' ');
 		// console.log(command);
 		const searchIndex = command.findIndex(checkIndex);
 		if (searchIndex != -1 && command.length > 1) {
+			console.log (message.author.username);
 			if (!clientId.includes(message.author.id)) {
 				await message.reply('sorry! must be privileged user to return ai completion');
 				return;

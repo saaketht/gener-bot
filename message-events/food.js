@@ -20,7 +20,7 @@ module.exports = {
 			const { image } = await fetch(`https://foodish-api.herokuapp.com/api/images/${foodType}`)
 				.then(response => response.json());
 			const link = image;
-			await message.reply(link);
+			message.reply(link);
 			console.log('message sent');
 		}
 	},
