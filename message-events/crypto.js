@@ -1,6 +1,8 @@
 // api via rapidapi
 const axios = require('axios').default;
-const { xRapidApiKey } = process.env.rapidApiKey; //require('./config.json');
+require('dotenv').config();
+const { xRapidApiKey } = process.env.rapidApiKey;
+// require('./config.json');
 
 const currencies = new Map();
 currencies.set('bitcoin', 'btc');

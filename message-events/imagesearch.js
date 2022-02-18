@@ -1,7 +1,8 @@
 // api via rapidapi
 const axios = require('axios').default;
-require('dotenv').config()
-const { xRapidApiKey } = process.env.rapidApiKey; // require('./config.json');
+require('dotenv').config();
+const { xRapidApiKey } = process.env.rapidApiKey;
+// require('./config.json');
 const searchCommand = 'imagesearch';
 module.exports = {
 	name: 'imagesearch',

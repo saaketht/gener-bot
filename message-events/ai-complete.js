@@ -1,5 +1,8 @@
-const { clientId } = process.env.privilegedIds;//require('../config.json');
-const { openAiApiKey } = process.env.openAiKey; // require('./config.json');
+require('dotenv').config();
+const { clientId } = process.env.privilegedIds;
+// require('../config.json');
+const { openAiApiKey } = process.env.openAiKey;
+// require('./config.json');
 const { Configuration, OpenAIApi } = require('openai');
 const searchCommand = 'ai-complete';
 module.exports = {
