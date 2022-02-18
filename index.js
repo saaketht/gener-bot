@@ -16,6 +16,8 @@ const client = new Client({ intents: myIntents });
 
 const PORT = process.env.PORT || 6565;
 http.createServer(function(req, res) {
+	res.writeHead(200, {'Content-Type': 'text/plain'});
+	res.write('Hello World!');
 	res.end();
 }).listen(PORT);
 console.log(`Server listening on ${PORT}`);
