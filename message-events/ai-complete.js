@@ -16,6 +16,7 @@ module.exports = {
 			console.log (message.author.username);
 			if (!clientId.includes(message.author.id)) {
 				await message.reply('sorry! must be privileged user to return ai completion');
+				console.log('unprivileged user access attempt');
 				return;
 			}
 			console.log(command);
@@ -23,7 +24,6 @@ module.exports = {
 				apiKey: openAiApiKey,
 			});
 			const openai = new OpenAIApi(configuration);
-			console.log(command);
 			const searchQuery = [];
 			for (let index = searchIndex + 1; index < command.length; index++) {
 				// console.log(command[index]);
