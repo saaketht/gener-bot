@@ -31,10 +31,10 @@ module.exports = {
 			}
 			if (searchQuery != '') {
 				console.log('search query: ' + searchQuery.join('+'));
-				const response = await openai.createCompletion('text-davinci-001', {
+				const response = await openai.createCompletion('text-ada-001', {
 					prompt: searchQuery.join(' '),
 					temperature: 0.9,
-					max_tokens: 100,
+					max_tokens: 500,
 					top_p: 1,
 					frequency_penalty: 0,
 					presence_penalty: 0,
