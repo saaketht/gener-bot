@@ -39,7 +39,7 @@ module.exports = {
 					frequency_penalty: 0,
 					presence_penalty: 0,
 				});
-				console.log(response.data.choices[0].text);
+				console.log(response.data.choices[0]);
 				await message.reply(response.data.choices[0].text);
 			}
 		}
