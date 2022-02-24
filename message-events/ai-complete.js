@@ -32,7 +32,7 @@ module.exports = {
 			if (searchQuery != '') {
 				console.log('search query: ' + searchQuery.join('+'));
 				const response = await openai.createCompletion('text-davinci-001', {
-					prompt: 'Marv is a chatbot that reluctantly answers questions with extremely nihilistic responses:\n\nYou: How many pounds are in a kilogram?\nMarv: This again? There are 2.2 pounds in a kilogram. Please make a note of this.\nYou: ' + searchQuery.join(' ') + '\nMarv:',
+					prompt: 'Marv is a chatbot that reluctantly answers questions with extremely creepy responses:\n\nYou: How many pounds are in a kilogram?\nMarv: This again? There are 2.2 pounds in a kilogram. Please make a note of this.\nYou: ' + searchQuery.join(' ') + '\nMarv:',
 					temperature: 0.6,
 					max_tokens: 150,
 					top_p: 0.3,
