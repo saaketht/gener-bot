@@ -33,10 +33,10 @@ module.exports = {
 				console.log('search query: ' + searchQuery.join('+'));
 				const response = await openai.createCompletion('text-davinci-001', {
 					prompt: searchQuery.join(' '),
-					temperature: 0.9,
+					temperature: 0.6,
 					max_tokens: 150,
-					top_p: 1,
-					frequency_penalty: 0,
+					top_p: 0.3,
+					frequency_penalty: 0.5,
 					presence_penalty: 0,
 				});
 				console.log(response.data.choices[0]);
