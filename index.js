@@ -51,7 +51,7 @@ const messageFiles = fs.readdirSync('./message-events').filter(file => file.ends
 for (const file of messageFiles) {
 	const messageEvent = require(`./message-events/${file}`);
 	client.on('messageCreate', async message => {
-		// if (message.author.bot) return;
+		if (message.author.bot) return;
 		//	console.log(message.content);
 		messageEvent.execute(message);
 	});
@@ -72,4 +72,4 @@ client.on('interactionCreate', async interaction => {
 });
 
 // Login to Discord with your client's token
-// client.login(token);
+client.login(token);
