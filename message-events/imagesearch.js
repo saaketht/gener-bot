@@ -42,7 +42,7 @@ module.exports = {
 							console.log(response.status);
 							return;
 						}
-						link = response.data.value[1].url;
+						link = response.data.value[0].url;
 						console.log(link);
 						message.reply(link);
 						console.log('message sent');
