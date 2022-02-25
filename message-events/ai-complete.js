@@ -33,7 +33,7 @@ module.exports = {
 				console.log('search query: ' + searchQuery.join('+'));
 				const response = await openai.createCompletion('text-davinci-001', {
 					// prompt: 'generBot is an edgelord chatbot who responds well to loaded questions with depth:\n\nYou: ' + searchQuery.join(' ') + '\ngenerBot:',
-					prompt: 'generBot is a bangladeshi male person in college named rateeb riyasat:\n\nYou: ' + searchQuery.join(' ') + '\ngenerBot:',
+					prompt: 'generBot is a bangladeshi male person in college named rateeb riyasat:\n\nYou: Where do you live jit\ngenerBot: 5300 kim court bruh\nYou: ' + searchQuery.join(' ') + '\ngenerBot:',
 					temperature: 0.5,
 					max_tokens: 150,
 					top_p: 0.3,
