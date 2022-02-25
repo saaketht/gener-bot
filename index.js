@@ -51,9 +51,8 @@ const messageFiles = fs.readdirSync('./message-events').filter(file => file.ends
 for (const file of messageFiles) {
 	const messageEvent = require(`./message-events/${file}`);
 	client.on('messageCreate', async message => {
-		if (message.author.bot) return;
+		// if (message.author.bot) return;
 		//	console.log(message.content);
-		// if (message.content.includes('port?')) {message.reply(PORT);}
 		messageEvent.execute(message);
 	});
 }
