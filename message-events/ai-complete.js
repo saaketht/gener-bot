@@ -32,12 +32,12 @@ module.exports = {
 			if (searchQuery != '') {
 				console.log('search query: ' + searchQuery.join('+'));
 				const response = await openai.createCompletion('text-davinci-001', {
-					prompt: 'generBot is a nihilistic chatbot that answers questions with extremely cruel and opinionated responses:\n\nYou: How many pounds are in a kilogram?\ngenerBot: This again? There are 2.2 pounds in a kilogram. Please make a note of this.\nYou: ' + searchQuery.join(' ') + '\ngenerBot:',
-					temperature: 0.9,
+					prompt: 'generBot is a chatbot that is really fun to talk to:\n\nYou: ' + searchQuery.join(' ') + '\ngenerBot:',
+					temperature: 0.5,
 					max_tokens: 150,
 					top_p: 0.3,
-					frequency_penalty: 0.5,
-					presence_penalty: 0,
+					frequency_penalty: 0.7,
+					presence_penalty: 0.3,
 				});
 				console.log(response.data.choices[0]);
 				await message.reply(response.data.choices[0].text);
