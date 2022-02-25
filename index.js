@@ -53,7 +53,7 @@ for (const file of messageFiles) {
 	client.on('messageCreate', async message => {
 		if (message.author.bot) return;
 		//	console.log(message.content);
-		if (message.content.includes('port?')) {message.reply(PORT);}
+		// if (message.content.includes('port?')) {message.reply(PORT);}
 		messageEvent.execute(message);
 	});
 }
