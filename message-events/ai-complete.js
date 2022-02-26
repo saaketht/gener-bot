@@ -40,8 +40,9 @@ module.exports = {
 					frequency_penalty: 2.0,
 					presence_penalty: 0.7,
 				});
-				console.log(typeof response.data.choices[0]);
-				const completion = response.data.choices[0];
+				console.log('AI RESPONSE: ' + typeof response.data.choices[0].text);
+				const completion = response.data.choices[0].text;
+				console.log(completion);
 				message.reply(completion);
 			}
 		}
