@@ -34,7 +34,7 @@ module.exports = {
 						to_name: 'Girl',
 						situation: 'Casual Conversation',
 						translate_from: 'auto',
-						translate_to: 'auto',
+						translate_to: 'English',
 					},
 					headers: {
 						'content-type': 'application/json',
