@@ -40,9 +40,9 @@ module.exports = {
 					frequency_penalty: 2.0,
 					presence_penalty: 0.7,
 				});
-				console.log(response.data);
-				/* .choices[0]*/
-				message.reply(response.data.choices[0]);
+				console.log(response.data.choices[0]);
+				const completion = response.data.choices[0];
+				message.reply(completion);
 			}
 		}
 
