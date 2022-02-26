@@ -30,7 +30,7 @@ module.exports = {
 					params: {
 						user_id: 'Marvin Orozco',
 						message: searchQuery.join(' '),
-						from_name: 'Marvin',
+						from_name: 'Rateeb Riyasat',
 						to_name: 'Girl',
 						situation: 'Casual Conversation',
 						translate_from: 'auto',
