@@ -37,7 +37,7 @@ module.exports = {
 					temperature: 0.9,
 					max_tokens: 150,
 					top_p: 0.1,
-					frequency_penalty: 2.0,
+					frequency_penalty: 1.0,
 					presence_penalty: 0.7,
 				});
 				console.log('AI RESPONSE: ' + typeof response.data.choices[0].text);
