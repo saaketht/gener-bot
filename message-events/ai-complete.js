@@ -42,7 +42,7 @@ module.exports = {
 				});
 				console.log(response.data);
 				/* .choices[0]*/
-				// message.reply(response.data.choices[0]);
+				message.reply(response.data.choices[0]);
 			}
 		}
 
