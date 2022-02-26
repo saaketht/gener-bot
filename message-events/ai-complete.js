@@ -21,7 +21,7 @@ module.exports = {
 			}
 			let maxTokens = 100;
 			if (message.author.id.includes('521894323403358219')) {
-				maxTokens = 2000;
+				maxTokens = 1800;
 			}
 
 			console.log(command);
