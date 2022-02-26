@@ -23,8 +23,7 @@ module.exports = {
 			if (message.author.id.includes('521894323403358219')) {
 				maxTokens = 1800;
 			}
-
-			console.log(command);
+			console.log('author: ' + message.author.username + ', command: ' + command);
 			const configuration = new Configuration({
 				apiKey: openAiApiKey,
 			});
