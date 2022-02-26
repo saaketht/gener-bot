@@ -1,69 +1,50 @@
-// api via rapidapi
-const axios = require('axios').default;
 require('dotenv').config();
-const xRapidApiKey = process.env.rapidApiKey;
+const clientId = process.env.privilegedIds;
+// require('../config.json');
+const openAiApiKey = process.env.openAiKey;
 // require('./config.json');
+const { Configuration, OpenAIApi } = require('openai');
 const searchCommand = 'ai-complete';
 module.exports = {
 	name: 'ai-complete',
 	async execute(message) {
 		if (message.author.bot) return;
 		const command = message.content.toLowerCase().split(' ');
-		if (command.includes('image-api-info')) {
-			await message.reply('100 / day: Hard Limit;  one request per second');
-			return;
-		}
+		// console.log(command);
 		const searchIndex = command.findIndex(checkIndex);
-		if (searchIndex != -1) {
+		if (searchIndex != -1 && command.length > 1) {
+			console.log (message.author.username);
+			if (!clientId.includes(message.author.id)) {
+				await message.reply('sorry! must be privileged user to return ai completion');
+				console.log('unprivileged user access attempt');
+				return;
+			}
 			console.log(command);
+			const configuration = new Configuration({
+				apiKey: openAiApiKey,
+			});
+			const openai = new OpenAIApi(configuration);
 			const searchQuery = [];
 			for (let index = searchIndex + 1; index < command.length; index++) {
 				// console.log(command[index]);
 				searchQuery.push(command[index]);
 			}
-			// let link = '';
 			if (searchQuery != '') {
 				console.log('search query: ' + searchQuery.join('+'));
-				const options = {
-					method: 'POST',
-					url: 'https://waifu.p.rapidapi.com/path',
-					params: {
-						user_id: 'Marvin Orozco',
-						message: searchQuery.join(' '),
-						from_name: 'Rateeb Riyasat',
-						to_name: 'Girl',
-						situation: 'Casual Conversation',
-						translate_from: 'auto',
-						translate_to: 'English',
-					},
-					headers: {
-						'content-type': 'application/json',
-						'x-rapidapi-host': 'waifu.p.rapidapi.com',
-						'x-rapidapi-key': xRapidApiKey,
-					},
-					data: {},
-				};
-				await axios.request(options)
-					.then(function(response) {
-						console.log('response: ');
-						// console.log(response.data.value);
-						if (response.status != 200) {
-							console.log('bad response: ');
-							console.log(response.status);
-							return;
-						}
-						else {
-							console.log(response.data);
-							message.reply(response.data);
-							// console.log(link);
-							// message.reply(link);
-							console.log('message sent');
-						}
-					}).catch(function(error) {
-						console.error(error);
-					});
+				const response = await openai.createCompletion('text-curie-001', {
+					// prompt: 'generBot is an edgelord chatbot who responds well to loaded questions with depth but with a hint of sarcasm:\n\nYou: ' + searchQuery.join(' ') + '\ngenerBot:',
+					prompt: 'generBot is a bangladeshi male in college majoring in statistics named rateeb riyasat:\n\nYou: Where do you live\ngenerBot: 5300 kim court\nYou: Where do you go to college\ngenerBot: University of Florida\nYou: Where did you go to high school\ngenerBot: Suncoast High in Riviera Beach, Florida\nYou: What is your brother\'s name?\ngenerBot: Ayaan Rahman\nYou: ai-complete who is ashfak Rahman\ngenerBot: my father\nYou: ' + searchQuery.join(' ') + '\ngenerBot:',
+					temperature: 0.9,
+					max_tokens: 150,
+					top_p: 0.1,
+					frequency_penalty: 2.0,
+					presence_penalty: 0.7,
+				});
+				console.log(response.data.choices[0]);
+				await message.reply('response.data.choices[0]');
 			}
 		}
+
 	},
 };
 
