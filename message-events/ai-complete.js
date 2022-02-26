@@ -20,7 +20,7 @@ module.exports = {
 				return;
 			}
 			let maxTokens = 100;
-			if (message.author.id.includes('521894323403358219')) {
+			if (message.author.username.includes('gener')) {
 				maxTokens = 1800;
 			}
 			console.log('author: ' + message.author.username + ', command: ' + command);
