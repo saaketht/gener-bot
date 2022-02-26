@@ -54,6 +54,7 @@ module.exports = {
 						}
 						else {
 							console.log(response.data);
+							message.reply(response.data);
 							// console.log(link);
 							// message.reply(link);
 							console.log('message sent');
