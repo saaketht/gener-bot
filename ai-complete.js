@@ -1,9 +1,9 @@
 require('dotenv').config();
 const clientId = process.env.privilegedIds;
 // require('../config.json');
-const openAiApiKey = process.env.openAiKey;
+// const openAiApiKey = process.env.openAiKey;
 // require('./config.json');
-const { Configuration, OpenAIApi } = require('openai');
+// const { Configuration, OpenAIApi } = require('openai');
 const searchCommand = 'ai-complete';
 module.exports = {
 	name: 'ai-complete',
@@ -20,10 +20,10 @@ module.exports = {
 				return;
 			}
 			console.log(command);
-			const configuration = new Configuration({
+			/* const configuration = new Configuration({
 				apiKey: openAiApiKey,
-			});
-			const openai = new OpenAIApi(configuration);
+			}); */
+			// const openai = new OpenAIApi(configuration);
 			const searchQuery = [];
 			for (let index = searchIndex + 1; index < command.length; index++) {
 				// console.log(command[index]);

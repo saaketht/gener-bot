@@ -21,7 +21,7 @@ module.exports = {
 				// console.log(command[index]);
 				searchQuery.push(command[index]);
 			}
-			let link = '';
+			// let link = '';
 			if (searchQuery != '') {
 				console.log('search query: ' + searchQuery.join('+'));
 				const options = {
@@ -30,7 +30,7 @@ module.exports = {
 					params: {
 						user_id: 'Rateeb Riyasat',
 						message: searchQuery.join(' '),
-						from_name: 'Rateeb',
+						from_name: 'Marvin',
 						to_name: 'Girl',
 						situation: 'Casual Conversation',
 						translate_from: 'auto',
