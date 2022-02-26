@@ -28,7 +28,7 @@ module.exports = {
 					method: 'POST',
 					url: 'https://waifu.p.rapidapi.com/path',
 					params: {
-						user_id: 'Rateeb Riyasat',
+						user_id: 'Marvin Orozco',
 						message: searchQuery.join(' '),
 						from_name: 'Marvin',
 						to_name: 'Girl',
