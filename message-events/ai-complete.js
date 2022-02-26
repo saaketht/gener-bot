@@ -41,7 +41,7 @@ module.exports = {
 					presence_penalty: 0.7,
 				});
 				console.log(response.data.choices[0]);
-				await message.reply('response.data.choices[0]');
+				await message.reply(response.data.choices[0]);
 			}
 		}
 
