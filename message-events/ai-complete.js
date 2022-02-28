@@ -56,5 +56,5 @@ module.exports = {
 };
 
 function checkIndex(string) {
-	return string == searchCommand;
+	return string == searchCommand || string == 'ai-cumplete';
 }
