@@ -20,6 +20,7 @@ module.exports = {
 			console.log(command);
 			const searchQuery = [];
 			let offset = 1;
+			let imgNum = 0
 			if (!isNaN(command[searchIndex + 1])){
 				imgNum = command[searchIndex + 1];
 				offset = 2;
@@ -49,7 +50,7 @@ module.exports = {
 							return;
 						}
 						else {
-							const valueIndex = response.data.value[0];
+							const valueIndex = response.data.value[imgNum];
 							link = valueIndex.contentUrl;
 							console.log('Link: ' + valueIndex.webSearchUrl + ', Insights: ' + valueIndex.imageInsightsToken);
 							message.reply(link);
