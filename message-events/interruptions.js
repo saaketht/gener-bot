@@ -33,6 +33,10 @@ module.exports = {
 			console.log(command.split(' '));
 			await message.reply('pong');
 		}
+		else if (command.includes('cap')) {
+			console.log(command.split(' '));
+			await message.reply('🧢');
+		}
 	},
 };
 
