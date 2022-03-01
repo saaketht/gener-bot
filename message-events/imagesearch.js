@@ -1,6 +1,6 @@
 // api via rapidapi
-const axios = require('axios').default;
 require('dotenv').config();
+const axios = require('axios').default;
 const xRapidApiKey = process.env.rapidApiKey;
 // require('./config.json');
 // require('./config.json');
@@ -15,13 +15,9 @@ module.exports = {
 			return;
 		}
 		const searchIndex = command.findIndex(checkIndex);
-		let imgNum = 0;
-		console.log(command);
-		if (command[searchIndex].length > 10) {
-			imgNum = command[searchIndex].split('')[11];
-		}
-		console.log('typing: ' + typeof command[searchIndex] + ' image number: ' + imgNum);
+		console.log('operator: ' + command[searchIndex] + ' consecutive param?: ' + command[searchCommand]);
 		if (searchIndex != -1) {
+			console.log(command);
 			const searchQuery = [];
 			for (let index = searchIndex + 1; index < command.length; index++) {
 				// console.log(command[index]);
@@ -49,7 +45,7 @@ module.exports = {
 							return;
 						}
 						else {
-							const valueIndex = response.data.value[imgNum];
+							const valueIndex = response.data.value[0];
 							link = valueIndex.contentUrl;
 							console.log('Link: ' + valueIndex.webSearchUrl + ', Insights: ' + valueIndex.imageInsightsToken);
 							message.reply(link);
