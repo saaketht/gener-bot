@@ -49,7 +49,7 @@ module.exports = {
 							return;
 						}
 						else {
-							// const valueIndex = response.data.value[imgNum];
+							const valueIndex = response.data.value[imgNum];
 							link = valueIndex.contentUrl;
 							console.log('Link: ' + valueIndex.webSearchUrl + ', Insights: ' + valueIndex.imageInsightsToken);
 							message.reply(link);
