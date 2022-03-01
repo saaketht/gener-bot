@@ -14,6 +14,11 @@ module.exports = {
 			return;
 		}
 		const searchIndex = command.findIndex(checkIndex);
+		let imgNum = 0;
+		if (command[searchIndex].length > 10) {
+			imgNum = command[searchIndex].split('')[11];
+		}
+		console.log('image number: ' + imgNum);
 		if (searchIndex != -1) {
 			console.log(command);
 			const searchQuery = [];
@@ -26,10 +31,10 @@ module.exports = {
 				console.log('search query: ' + searchQuery.join('+'));
 				const options = {
 					method: 'GET',
-					url: 'https://contextualwebsearch-websearch-v1.p.rapidapi.com/api/Search/ImageSearchAPI',
-					params: { q: searchQuery.join(' '), pageNumber: '1', pageSize: '1', autoCorrect: 'true' },
+					url: 'https://bing-image-search1.p.rapidapi.com/images/search',
+					params: { q: searchQuery.join(' ') },
 					headers: {
-						'x-rapidapi-host': 'contextualwebsearch-websearch-v1.p.rapidapi.com',
+						'x-rapidapi-host': 'bing-image-search1.p.rapidapi.com',
 						'x-rapidapi-key': xRapidApiKey,
 					},
 				};
@@ -43,8 +48,9 @@ module.exports = {
 							return;
 						}
 						else {
-							link = response.data.value[0].url;
-							console.log(link);
+							const valueIndex = response.data.value[imgNum];
+							link = valueIndex.contentUrl;
+							console.log('Link: ' + valueIndex.webSearchUrl + ', Insights: ' + valueIndex.imageInsightsToken);
 							message.reply(link);
 							console.log('message sent');
 						}
@@ -57,5 +63,5 @@ module.exports = {
 };
 
 function checkIndex(string) {
-	return string == searchCommand;
+	return string.includes(searchCommand);
 }
