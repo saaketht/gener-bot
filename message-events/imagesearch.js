@@ -11,19 +11,23 @@ module.exports = {
 		if (message.author.bot) return;
 		const command = message.content.toLowerCase().split(' ');
 		if (command.includes('image-api-info')) {
-			await message.reply('100 / day: Hard Limit;  one request per second');
+			await message.reply('1000 / month: Hard Limit;  three requests per second');
 			return;
 		}
 		const searchIndex = command.findIndex(checkIndex);
-		console.log('operator: ' + command[searchIndex] + ' consecutive param?: ' + command[searchCommand]);
 		if (searchIndex != -1) {
+			console.log('operator: ' + command[searchIndex] + ' consecutive param?: ' + command[searchIndex + 1]);
 			console.log(command);
 			const searchQuery = [];
-			for (let index = searchIndex + 1; index < command.length; index++) {
+			let offset = 1;
+			if (!isNaN(command[searchIndex + 1])){
+				imgNum = command[searchIndex + 1];
+				offset = 2;
+			}
+			for (let index = searchIndex + offset; index < command.length; index++) {
 				// console.log(command[index]);
 				searchQuery.push(command[index]);
 			}
-			let link = '';
 			if (searchQuery != '') {
 				console.log('search query: ' + searchQuery.join('+'));
 				const options = {
