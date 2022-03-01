@@ -3,6 +3,7 @@ const axios = require('axios').default;
 require('dotenv').config();
 const xRapidApiKey = process.env.rapidApiKey;
 // require('./config.json');
+// require('./config.json');
 const searchCommand = 'imagesearch';
 module.exports = {
 	name: 'imagesearch',
@@ -15,12 +16,12 @@ module.exports = {
 		}
 		const searchIndex = command.findIndex(checkIndex);
 		let imgNum = 0;
+		console.log(command);
 		if (command[searchIndex].length > 10) {
 			imgNum = command[searchIndex].split('')[11];
 		}
-		console.log('image number: ' + imgNum);
+		console.log('typing: ' + typeof command[searchIndex] + ' image number: ' + imgNum);
 		if (searchIndex != -1) {
-			console.log(command);
 			const searchQuery = [];
 			for (let index = searchIndex + 1; index < command.length; index++) {
 				// console.log(command[index]);
@@ -48,7 +49,7 @@ module.exports = {
 							return;
 						}
 						else {
-							const valueIndex = response.data.value[imgNum];
+							// const valueIndex = response.data.value[imgNum];
 							link = valueIndex.contentUrl;
 							console.log('Link: ' + valueIndex.webSearchUrl + ', Insights: ' + valueIndex.imageInsightsToken);
 							message.reply(link);
