@@ -27,7 +27,7 @@ module.exports = {
 			}
 			for (let index = searchIndex + offset; index < command.length; index++) {
 				// console.log(command[index]);
-				searchQuery.push(command[index])
+				searchQuery.push(command[index]);
 			}
 			if (searchQuery != '') {
 				console.log('search query: ' + searchQuery.join('+'));
