@@ -38,6 +38,9 @@ module.exports = {
 			console.log(command.split(' '));
 			await message.reply('🧢');
 		}
+		else if (command.includes('daily')) {
+			await message.reply('https://xkcd.com/');
+		}
 	},
 };
 
