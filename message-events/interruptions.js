@@ -61,9 +61,11 @@ module.exports = {
 			await message.reply(res.message);
 			console.log('message sent');
 		}
-		else if (command.includes('dog')) { 
+		else if (command.includes('roll')) { 
 			console.log(command.split(' '));
-
+			const x = randomIntFromInterval(1, 6);
+			console.log(x);
+			await message.reply(x);
 		}
 	},
 };
