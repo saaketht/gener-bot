@@ -15,6 +15,7 @@ module.exports = {
 		else if (command.includes('crazy')) {
 			console.log(command.split(' '));
 			const x = randomIntFromInterval(1, 10);
+			console.log(x);
 			if (x <= 6) {
 				await message.reply('fr');
 			}
