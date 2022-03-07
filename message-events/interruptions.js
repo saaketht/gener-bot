@@ -14,11 +14,11 @@ module.exports = {
 		}
 		else if (command.includes('crazy')) {
 			console.log(command.split(' '));
-			const x = randomIntFromInterval(1, 3);
-			if (x == 1) {
-				await message.reply('for real');
+			const x = randomIntFromInterval(1, 10);
+			if (x <= 6) {
+				await message.reply('fr');
 			}
-			else if (x == 2) {
+			else if (x > 6 && x < 8) {
 				await message.reply('ong');
 			}
 			else {
@@ -59,6 +59,10 @@ module.exports = {
 			console.log('dog api status: ' + res.status + ' dog link: ' + res.message);
 			await message.reply(res.message);
 			console.log('message sent');
+		}
+		else if (command.includes('dog')) { 
+			console.log(command.split(' '));
+
 		}
 	},
 };
