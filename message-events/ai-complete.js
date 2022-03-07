@@ -14,11 +14,11 @@ module.exports = {
 		const searchIndex = command.findIndex(checkIndex);
 		if (searchIndex != -1 && command.length > 1) {
 			console.log (message.author.username);
-			if (!clientId.includes(message.author.id)) {
+			/* if (!clientId.includes(message.author.id)) {
 				await message.reply('sorry! must be privileged user to return ai completion');
 				console.log('unprivileged user access attempt');
 				return;
-			}
+			} */
 			let maxTokens = 100;
 			if (message.author.username.includes('gener')) {
 				maxTokens = 1800;
