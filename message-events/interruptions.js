@@ -50,7 +50,7 @@ module.exports = {
 		}
 		else if (command.includes('random')) { 
 			console.log(command.split(' '));
-			await message.reply('https://source.unsplash.com/random/300x200?sig=${Math.random()}');
+			await message.reply('https://source.unsplash.com/random/300x200?sig=' + Math.random());
 			console.log('message sent');
 		}
 		else if (command.includes('dog')) {
