@@ -41,6 +41,7 @@ module.exports = {
 		else if (command.includes('daily')) {
 			await message.reply('https://xkcd.com/');
 		}
+		console.log('message sent');
 	},
 };
 
