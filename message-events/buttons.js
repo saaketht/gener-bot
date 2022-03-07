@@ -1,5 +1,5 @@
 const { MessageEmbed } = require('discord.js');
-const searchCommand = 'imagesearch';
+const searchCommand = 'buttons';
 
 module.exports = {
     name: 'buttons',
