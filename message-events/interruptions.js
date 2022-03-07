@@ -39,7 +39,18 @@ module.exports = {
 			await message.reply('🧢');
 		}
 		else if (command.includes('daily')) {
+			console.log(command.split(' '));
 			await message.reply('https://xkcd.com/');
+		}
+		else if (command.includes('random')) { 
+			console.log(command.split(' '));
+			await message.reply('https://source.unsplash.com/random/300x200?sig=${Math.random()}');
+		}
+		else if (command.includes('dog')) {
+			console.log(command.split(' '));
+			const { message, status } = await fetch('https://dog.ceo/api/breeds/image/random').then(response => response.json());
+			console.log('dog api status: ' + status + ' dog link: ' + message);
+			await message.reply(message);
 		}
 		console.log('message sent');
 	},
