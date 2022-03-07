@@ -19,11 +19,11 @@ module.exports = {
 			if (x <= 6) {
 				await message.reply('fr');
 			}
-			else if (x > 6 && x < 8) {
+			else if (x > 6 && x < 9) {
 				await message.reply('ong');
 			}
 			else {
-				await message.reply('fr');
+				await message.reply('for real');
 			}
 			console.log('message sent');
 		}
