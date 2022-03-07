@@ -28,9 +28,9 @@ module.exports = {
 		}
 		else if (command.includes('cat')) {
 			console.log(command.split(' '));
-			const { file } = await fetch('https://aws.random.cat/meow').then(response => response.json());
-			console.log(file);
-			await message.reply(file);
+			const res = await fetch('https://aws.random.cat/meow').then(response => response.json());
+			console.log(res.file);
+			await message.reply(res.file);
 			console.log('message sent');
 		}
 		else if (command.includes('ping')) {
