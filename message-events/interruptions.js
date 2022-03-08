@@ -4,7 +4,7 @@ const fetch = require('node-fetch');
 module.exports = {
 	name: 'interruptions',
 	async execute(message) {
-		if (message.author.bot) return;
+		// if (message.author.bot) return;
 		// if (message.author.username.includes('gener')) return;
 		const command = message.content.split(' ').join('').toLowerCase();
 		if (command.includes('bruh')) {
