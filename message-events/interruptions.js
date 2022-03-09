@@ -79,7 +79,7 @@ module.exports = {
 			console.log(command);
 			message.reply(foodCategories.join(', '));
 		}
-		else if (command.includes('furryTail')) {
+		else if (command.includes('furrytail')) {
 			message.reply('https://cdn.discordapp.com/attachments/544570497791295535/554174044551905290/video.mov');
 		}
 	},
