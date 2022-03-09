@@ -65,5 +65,5 @@ module.exports = {
 };
 
 function checkIndex(string) {
-	return string.includes(searchCommand);
+	return string.includes(searchCommand) || string.includes('imagsearch') || string.includes('getimage');
 }
