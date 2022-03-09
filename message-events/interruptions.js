@@ -52,8 +52,9 @@ module.exports = {
 		}
 		else if (command.includes('random')) { 
 			console.log(command.split(' '));
-			await message.reply('https://source.unsplash.com/random/300x200?sig=' + Math.random());
-			console.log('message sent');
+			const res = 'https://source.unsplash.com/random/300x200?sig=' + Math.random();
+			message.reply(res);
+			console.log('message sent, link: ' + res);
 		}
 		else if (command.includes('dog')) {
 			console.log(command.split(' '));
