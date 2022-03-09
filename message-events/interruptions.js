@@ -67,6 +67,9 @@ module.exports = {
 			console.log(x);
 			await message.reply('roll result: ' + x);
 		}
+		else if (command.includes('ipad')) {
+			message.reply('https://pbs.twimg.com/media/C9ww_L2UQAAHxd1.jpg');
+		}
 	},
 };
 
