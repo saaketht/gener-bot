@@ -80,7 +80,7 @@ module.exports = {
 			message.reply(foodCategories.join(', '));
 		}
 		else if (command.includes('furryTail')) {
-			message.reply('https://discord.com/channels/@me/544570497791295535/554174044551905291');
+			message.reply('https://cdn.discordapp.com/attachments/544570497791295535/554174044551905290/video.mov');
 		}
 	},
 };
