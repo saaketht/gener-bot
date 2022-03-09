@@ -82,6 +82,9 @@ module.exports = {
 		else if (command.includes('furrytail')) {
 			message.reply('https://cdn.discordapp.com/attachments/544570497791295535/554174044551905290/video.mov');
 		}
+		else if (command.includes('ski')) {
+			message.reply('https://cdn.discordapp.com/attachments/945820129457995836/950996673117704192/IMG_6429.jpg');
+		}
 	},
 };
 
