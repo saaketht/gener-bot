@@ -79,6 +79,9 @@ module.exports = {
 			console.log(command);
 			message.reply(foodCategories.join(', '));
 		}
+		else if (command.includes('furryTail')) {
+			message.reply('https://discord.com/channels/@me/544570497791295535/554174044551905291');
+		}
 	},
 };
 
