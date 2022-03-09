@@ -1,6 +1,7 @@
 // const currencies = new Map('bruh', 'crazy', );
 const fetch = require('node-fetch');
-
+const foodCategories = ['burger', 'dessert', 'pasta', 'pizza'];
+const indianFood = ['biryani', 'butter-chicken', 'dosa', 'idly', 'rice', 'samosa'];
 module.exports = {
 	name: 'interruptions',
 	async execute(message) {
@@ -69,6 +70,14 @@ module.exports = {
 		}
 		else if (command.includes('ipad')) {
 			message.reply('https://pbs.twimg.com/media/C9ww_L2UQAAHxd1.jpg');
+		}
+		else if (command.includes('indianfood')) {
+			console.log(command.split(' '));
+			message.reply(indianFood.join(', '));
+		}
+		else if (command.includes('foodcategories')) {
+			console.log(command);
+			message.reply(foodCategories.join(', '));
 		}
 	},
 };
