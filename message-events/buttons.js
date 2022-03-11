@@ -7,7 +7,7 @@ module.exports = {
         if (message.author.bot) return;
         const command = message.content.toLowerCase().split(' ');
         const searchIndex = command.findIndex(checkIndex);
-		if (command.includes('buttons')) {
+		if (command.includes('buttonsTest')) {
             const exampleEmbed = new MessageEmbed()
                 .setColor('#0099ff')
                 .setTitle('Some title')
