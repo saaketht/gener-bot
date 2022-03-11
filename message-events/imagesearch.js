@@ -3,7 +3,6 @@ require('dotenv').config();
 const axios = require('axios').default;
 const xRapidApiKey = process.env.rapidApiKey;
 // require('./config.json');
-// require('./config.json');
 const searchCommand = 'imagesearch';
 module.exports = {
 	name: 'imagesearch',
@@ -65,5 +64,5 @@ module.exports = {
 };
 
 function checkIndex(string) {
-	return string.includes(searchCommand) || string.includes('imagsearch') || string.includes('getimage');
+	return string.includes(searchCommand) || (string.includes('imagsearch') || string.includes('getimage'));
 }
