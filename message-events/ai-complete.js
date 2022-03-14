@@ -49,7 +49,7 @@ module.exports = {
 					frequency_penalty: 1.0,
 					presence_penalty: 0.5,
 				});
-				console.log('RESPONSE : ' + response.data.choices[0].text);
+				console.log('RESPONSE : ' + response.data.choices[0]);
 				const completion = response.data.choices[0].text;
 				console.log(completion);
 				message.reply(completion);
