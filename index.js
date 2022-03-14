@@ -173,8 +173,7 @@ client.on('messageCreate', async (message) => {
 	if (!message.guild) return;
 	if (message.content === '-join') {
 		const channel = message.member?.voice.channel;
-		console.log(typeof channel);
-		if (channel) {
+		if (channel.speakable == 1) {
 			try {
 				const connection = await connectToChannel(channel);
 				connection.subscribe(player);
@@ -185,7 +184,7 @@ client.on('messageCreate', async (message) => {
 		} else {
 			await message.reply('Join a voice channel then try again!');
 		}
-	}
+	} 
 });
 
 // Login to Discord with your client's token
