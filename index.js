@@ -173,7 +173,7 @@ client.on('messageCreate', async (message) => {
 	if (!message.guild) return;
 	if (message.content === '-join') {
 		const channel = message.member?.voice.channel;
-		console.log(channel);
+		console.log(message.member?.voice);
 		if (channel) {
 			try {
 				const connection = await connectToChannel(channel);
