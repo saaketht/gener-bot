@@ -71,5 +71,14 @@ client.on('interactionCreate', async interaction => {
 	}
 });
 
+// single event listeners for all state changes **MAY CHANGE
+connection.on('stateChange', (oldState, newState) => {
+	console.log(`Connection transitioned from ${oldState.status} to ${newState.status}`);
+});
+
+player.on('stateChange', (oldState, newState) => {
+	console.log(`Audio player transitioned from ${oldState.status} to ${newState.status}`);
+});
+
 // Login to Discord with your client's token
 client.login(token);

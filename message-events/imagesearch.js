@@ -20,7 +20,7 @@ module.exports = {
 			const searchQuery = [];
 			let offset = 1;
 			let imgNum = 0
-			if (!isNaN(command[searchIndex + 1])){
+			if ( (!isNaN(command[searchIndex + 1])) && (command[searchIndex + 1] < 19) ){
 				imgNum = command[searchIndex + 1];
 				offset = 2;
 			}
