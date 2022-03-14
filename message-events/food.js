@@ -22,6 +22,7 @@ module.exports = {
 			const link = image;
 			message.reply(link);
 			console.log('message sent');
+			return;
 		}
 	},
 };
