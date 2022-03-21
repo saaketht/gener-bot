@@ -1,12 +1,16 @@
 {
-	"extends": "eslint:recommended",
 	"env": {
+		"browser": true,
 		"node": true,
-		"es6": true
+		"es2021": true
 	},
+	"parser": "@typescript-eslint/parser",
 	"parserOptions": {
-		"ecmaVersion": 2021
+		"ecmaVersion": "latest",
+		"sourceType": "module"
 	},
+	"plugins": ["@typescript-eslint"],
+	"extends": ["eslint:recommended", "plugin:@typescript-eslint/recommended"],
 	"rules": {
 		"arrow-spacing": ["warn", { "before": true, "after": true }],
 		"brace-style": ["error", "stroustrup", { "allowSingleLine": true }],
@@ -39,13 +43,13 @@
 			"anonymous": "never",
 			"named": "never",
 			"asyncArrow": "always"
-		}],
+			}],
 		"space-in-parens": "error",
 		"space-infix-ops": "error",
 		"space-unary-ops": "error",
 		"spaced-comment": "error",
-		"yoda": "error",
-		"parser": "@babel/eslint-parser"
+		"@typescript-eslint/no-explicit-any": "off",
+		"yoda": "error"
 	}
 }
 
