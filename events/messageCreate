@@ -1,0 +1,28 @@
+/* import { Guild, Message } from 'discord.js';
+import { DiscordClient } from '../@types/bot';
+
+const messageCreateEvent = {
+	name: 'messageCreate',
+	async execute(message: Message) {
+		if (message.author.bot) return;
+		const client = message.client as DiscordClient;
+		const command = client.messageEvents.get(message.commandName);
+
+		if (!command) return;
+
+		const guild: Guild | null = interaction.guild;
+		if (!guild) return;
+
+		try {
+			await command.execute(client, message);
+		}
+		catch (error) {
+			console.error(`[${guild.id}]`, error);
+			await message.reply({
+				content: 'There was an error while executing this command!',
+			});
+		}
+	},
+};
+
+export default messageCreateEvent; */
