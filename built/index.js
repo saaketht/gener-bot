@@ -19,7 +19,7 @@ const player = (0, voice_1.createAudioPlayer)({
     },
 });
 function playSong() {
-    const resource = (0, voice_1.createAudioResource)('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', {
+    const resource = (0, voice_1.createAudioResource)('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', {
         inputType: voice_1.StreamType.Arbitrary,
     });
     player.play(resource);
@@ -65,7 +65,7 @@ client.db = mongo;
             client.on(event.name, (...args) => event.execute(...args));
         }
     });
-    console.log(`Loaded ${events.length} events.`);
+    console.log(`Loaded ${events.length} passive events.`);
 });
 // read in message event files
 (0, utils_1.readMessageEvents)().then((messageEvents) => {
@@ -77,7 +77,7 @@ client.db = mongo;
             messageEvent.execute(message);
         });
     });
-    console.log(`Loaded ${messageEvents.length} events.`);
+    console.log(`Loaded ${messageEvents.length} message events.`);
 });
 // log port and print to web dyno port cause why not?
 const PORT = process.env.PORT || 6575;

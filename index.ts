@@ -87,7 +87,7 @@ readEvents().then((events) => {
 			client.on(event.name, (...args: unknown[]) => event.execute(...args));
 		}
 	});
-	console.log(`Loaded ${events.length} events.`);
+	console.log(`Loaded ${events.length} passive events.`);
 });
 
 // read in message event files
@@ -99,7 +99,7 @@ readMessageEvents().then((messageEvents) => {
 			messageEvent.execute(message);
 		});
 	});
-	console.log(`Loaded ${messageEvents.length} events.`);
+	console.log(`Loaded ${messageEvents.length} message events.`);
 });
 
 // log port and print to web dyno port cause why not?

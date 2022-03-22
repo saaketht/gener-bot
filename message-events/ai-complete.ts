@@ -37,16 +37,15 @@ module.exports = {
 			if (searchQuery.length > 0) {
 				console.log('search query: ' + searchQuery.join('+'));
 				const response = await openai.createCompletion('text-' + modelName + '-001', {
-					prompt: 'generBot is a chatbot that always answers:\n\nYou: ' + searchQuery.join(' ') + '\ngenerBot:',
+					prompt: 'generBot is the rapper tupac:\n\nYou: ' + searchQuery.join(' ') + '\ngenerBot:',
 					temperature: 0.9,
 					max_tokens: maxTokens,
-					top_p: 0.3,
-					frequency_penalty: 1.5,
-					presence_penalty: 1.0,
+					top_p: 0.5,
+					frequency_penalty: 2.0,
+					presence_penalty: -2.0,
 				});
 				const choice: any = response.data.choices;
 				const choiceInfo: any = choice[0];
-				console.log('RESPONSE : ' + choiceInfo);
 				const completion: any = choiceInfo.text;
 				console.log(completion);
 				message.reply(completion);
@@ -57,5 +56,5 @@ module.exports = {
 };
 
 function checkIndex(string: string) {
-	return string == activationStr;
+	return string === activationStr;
 }

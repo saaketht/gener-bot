@@ -1,5 +1,5 @@
 import { Command, DiscordEvent, MessageEvent } from '../@types/bot';
-import * as glob from 'glob';
+import glob from 'glob';
 
 const readCommands = async (): Promise<Command[]> => {
 	const commands: Command[] = [];
