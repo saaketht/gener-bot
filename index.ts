@@ -31,7 +31,7 @@ const player = createAudioPlayer({
 });
 
 function playSong() {
-	const resource = createAudioResource('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', {
+	const resource = createAudioResource('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', {
 		inputType: StreamType.Arbitrary,
 	});
 
