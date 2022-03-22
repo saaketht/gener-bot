@@ -1,21 +1,7 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-import {
-	joinVoiceChannel,
-	createAudioPlayer,
-	createAudioResource,
-	entersState,
-	StreamType,
-	AudioPlayerStatus,
-	VoiceConnectionStatus,
-	getVoiceConnection,
-	NoSubscriberBehavior,
-	VoiceConnection,
-} from '@discordjs/voice';
 // import elements/types
-import { Client, Collection, Intents, VoiceBasedChannel, VoiceChannel } from 'discord.js';
+import { Client, Collection, Intents } from 'discord.js';
 import { DatabaseRepository, Command, DiscordClient } from './@types/bot';
 import { readCommands, readEvents, readMessageEvents } from './utils/utils';
-import { createDiscordJSAdapter } from './adapter';
 // import modules
 import MongoDb from './mongo';
 import dotenv from 'dotenv';
@@ -23,41 +9,6 @@ import http from 'http';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import * as fs from 'fs';
 dotenv.config();
-
-const player = createAudioPlayer({
-	behaviors: {
-		noSubscriber: NoSubscriberBehavior.Pause,
-	},
-});
-
-function playSong() {
-	const resource = createAudioResource('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', {
-		inputType: StreamType.Arbitrary,
-	});
-
-	player.play(resource);
-
-	return entersState(player, AudioPlayerStatus.Playing, 5e3);
-}
-
-async function connectToChannel(channel: VoiceBasedChannel) {
-	const connection = joinVoiceChannel({
-		channelId: channel.id,
-		guildId: channel.guild.id,
-		adapterCreator: channel.guild.voiceAdapterCreator,
-	});
-
-
-	try {
-		await entersState(connection, VoiceConnectionStatus.Ready, 30e3);
-
-		return connection;
-	}
-	catch (error) {
-		connection.destroy();
-		throw error;
-	}
-}
 
 const MONGO_URI = 'mongodb+srv://' + process.env.MONGO_DB_USER + ':' + process.env.MONGO_DB_PASSWORD + '@genbot.vslua.mongodb.net/myFirstDatabase?retryWrites=true&w=majority';
 const mongo: DatabaseRepository = new MongoDb(MONGO_URI);
@@ -115,50 +66,6 @@ console.log(`Server listening on ${PORT}`);
 
 //	Login to Discord with your client's token
 client.login(process.env.token);
-
-client.on('ready', async () => {
-	try {
-		await playSong();
-		console.log('Song is ready to play!');
-	}
-	catch (error) {
-		console.error(error);
-	}
-});
-
-client.on('messageCreate', async (message) => {
-	if (!message.guild) return;
-
-	const channel = message.member?.voice.channel;
-	if (message.content === '-join') {
-		if (channel) {
-			try {
-				const connection = await connectToChannel(channel);
-				connection.subscribe(player);
-				message.reply('Playing now!');
-			}
-			catch (error) {
-				console.error(error);
-			}
-		}
-		else {
-			message.reply('Join a voice channel then try again!');
-		}
-	}
-	else if (message.content === '-exit') {
-		if (channel) {
-			try {
-				const connection = getVoiceConnection(channel.guild.id);
-				if (connection) {
-					connection.destroy();
-				}
-			}
-			catch (error) {
-				console.error(error);
-			}
-		}
-	}
-});
 
 //	read in command files **DEPRECATED METHOD**
 /*	client.commands = new Collection();
