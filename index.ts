@@ -1,5 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 // import elements/types
-import { Client, Collection, Intents } from 'discord.js';
+import Discord, { Client, Collection, Intents, Interaction, GuildMember, Snowflake } from 'discord.js';
 import { DatabaseRepository, Command, DiscordClient } from './@types/bot';
 import { readCommands, readEvents, readMessageEvents } from './utils/utils';
 // import modules

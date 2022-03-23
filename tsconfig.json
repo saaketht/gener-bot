@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
-    /* Docs: https://www.typescriptlang.org/tsconfig */ 
+    /* Docs: https://www.typescriptlang.org/tsconfig */
+		"baseUrl": ".",
     "target": "ES2020",
     "module": "commonjs",
     "outDir": "./built",
@@ -16,7 +17,14 @@
     "allowUnreachableCode": false,
     "noFallthroughCasesInSwitch": true,
     "useUnknownInCatchVariables": false, // TypeScript 4.4+ only!
-    "typeRoots": ["../@types", "../node_modules/@types"]
+    "typeRoots": ["../@types", "../node_modules/@types"],
+    "paths": {
+			"@discordjs/voice": ["../../"],
+			"@discordjs/opus": ["./node_modules/@discordjs/opus"],
+			"sodium": ["./node_modules/sodium"],
+			"libsodium-wrappers": ["./node_modules/libsodium-wrappers"],
+			"tweetnacl": ["./node_modules/tweetnacl"]
+		}
   },
   "include": ["./**/*.ts", "./**/*.js"],
   "exclude": ["node_modules", "<node_internals>/**", "./built/**/*"]
