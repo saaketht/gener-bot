@@ -37,7 +37,7 @@ module.exports = {
 			if (searchQuery.length > 0) {
 				console.log('search query: ' + searchQuery.join('+'));
 				const response = await openai.createCompletion('text-' + modelName + '-001', {
-					prompt: 'generBot is a chatbot that takes everything as a joke:\n\nYou: ' + searchQuery.join(' ') + '\ngenerBot:',
+					prompt: 'generBot is a very humorous chatbot that has strong opinions on pop culture:\n\nYou: ' + searchQuery.join(' ') + '\ngenerBot:',
 					temperature: 0.9,
 					max_tokens: maxTokens,
 					top_p: 0.5,

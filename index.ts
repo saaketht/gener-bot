@@ -1,12 +1,12 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 // import elements/types
-import Discord, { Client, Collection, Intents, Interaction, GuildMember, Snowflake } from 'discord.js';
+import { Client, Collection, Intents } from 'discord.js';
 import { DatabaseRepository, Command, DiscordClient } from './@types/bot';
 import { readCommands, readEvents, readMessageEvents } from './utils/utils';
 // import modules
 import MongoDb from './mongo';
 import dotenv from 'dotenv';
 import http from 'http';
+import Sequelize from 'sequelize';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import * as fs from 'fs';
 dotenv.config();

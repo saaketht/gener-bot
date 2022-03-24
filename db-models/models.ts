@@ -12,7 +12,7 @@ const ServerSettingsSchema: mongoose.Schema<MongoResult> =
 	});
 
 const ServerSettings: mongoose.Model<MongoResult> = mongoose.model<MongoResult>(
-	'<table-name>',
+	'ServerSettings',
 	ServerSettingsSchema,
 );
 
