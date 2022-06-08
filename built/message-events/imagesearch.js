@@ -24,7 +24,7 @@ module.exports = {
             console.log(command);
             const searchQuery = [];
             let offset = 1;
-            let imgNum;
+            let imgNum = 0;
             if ((!isNaN(Number(command[searchIndex + 1]))) && (Number(command[searchIndex + 1]) < 19)) {
                 imgNum = command[searchIndex + 1];
                 offset = 2;
@@ -56,9 +56,9 @@ module.exports = {
                     else {
                         const valueIndex = response.data.value[imgNum];
                         const link = valueIndex.contentUrl;
-                        console.log('Link: ' + valueIndex.webSearchUrl + ', Insights: ' + valueIndex.imageInsightsToken);
+                        console.log('Link: ' + valueIndex.webSearchUrl + ', image #: ' + imgNum + ', Insights: ' + valueIndex.imageInsightsToken);
                         message.reply(link);
-                        console.log('message sent');
+                        console.log('image link sent!');
                     }
                 }).catch(function (error) {
                     console.error(error);

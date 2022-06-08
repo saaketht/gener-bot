@@ -4,50 +4,45 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 /* eslint-disable @typescript-eslint/no-unused-vars */
-const voice_1 = require("@discordjs/voice");
 // import elements/types
 const discord_js_1 = require("discord.js");
 const utils_1 = require("./utils/utils");
-// import modules
-const mongo_1 = __importDefault(require("./mongo"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const http_1 = __importDefault(require("http"));
 dotenv_1.default.config();
-const player = (0, voice_1.createAudioPlayer)({
-    behaviors: {
-        noSubscriber: voice_1.NoSubscriberBehavior.Pause,
-    },
-});
-function playSong() {
-    const resource = (0, voice_1.createAudioResource)('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', {
-        inputType: voice_1.StreamType.Arbitrary,
-    });
-    player.play(resource);
-    return (0, voice_1.entersState)(player, voice_1.AudioPlayerStatus.Playing, 5e3);
-}
-async function connectToChannel(channel) {
-    const connection = (0, voice_1.joinVoiceChannel)({
-        channelId: channel.id,
-        guildId: channel.guild.id,
-        adapterCreator: channel.guild.voiceAdapterCreator,
-    });
-    try {
-        await (0, voice_1.entersState)(connection, voice_1.VoiceConnectionStatus.Ready, 30e3);
-        return connection;
-    }
-    catch (error) {
-        connection.destroy();
-        throw error;
-    }
-}
-const MONGO_URI = 'mongodb+srv://' + process.env.MONGO_DB_USER + ':' + process.env.MONGO_DB_PASSWORD + '@genbot.vslua.mongodb.net/myFirstDatabase?retryWrites=true&w=majority';
-const mongo = new mongo_1.default(MONGO_URI);
+// const MONGO_URI = 'mongodb+srv://' + process.env.MONGO_DB_USER + ':' + process.env.MONGO_DB_PASSWORD + '@genbot.vslua.mongodb.net/myFirstDatabase?retryWrites=true&w=majority';
+// const mongo: DatabaseRepository = new MongoDb(MONGO_URI);
 const myIntents = new discord_js_1.Intents();
 myIntents.add(discord_js_1.Intents.FLAGS.GUILDS, discord_js_1.Intents.FLAGS.GUILD_MESSAGES, discord_js_1.Intents.FLAGS.GUILD_MESSAGE_TYPING);
 // create a new client instance
 const client = new discord_js_1.Client({ intents: myIntents });
 client.commands = new discord_js_1.Collection();
-client.db = mongo;
+// client.db = mongo;
+/* // Collection to cache user currency amounts
+const currency = new Collection();
+// Defining collection helper methods
+Reflect.defineProperty(currency, 'add', {
+    value: async (id: unknown, amount: any) => {
+        const user: any = currency.get(id);
+
+        if (user) {
+            user.balance += Number(amount);
+            return user.save();
+        }
+
+        const newUser = await Users.create({ user_id: id, balance: amount });
+        currency.set(id, newUser);
+
+        return newUser;
+    },
+});
+
+Reflect.defineProperty(currency, 'getBalance', {
+    value: (id: unknown) => {
+        const user:any = currency.get(id);
+        return user ? user.balance : 0;
+    },
+}); */
 // read in command files
 (0, utils_1.readCommands)().then((commands) => {
     commands.forEach((cmd) => {
@@ -79,8 +74,36 @@ client.db = mongo;
     });
     console.log(`Loaded ${messageEvents.length} message events.`);
 });
+/* client.once('ready', async () => {
+    const storedBalances = await Users.findAll();
+    storedBalances.forEach(b => {
+        // @ts-expect-error b is from a database and such user_id cannot import type
+        currency.set(b.user_id, b);
+    });
+});
+
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isCommand()) return;
+
+    const { commandName } = interaction;
+
+    if (commandName === 'balance') {
+        const target = interaction.options.getUser('user') ?? interaction.user;
+
+        return interaction.reply(`${target.tag} has ${currency.getBalance(target.id)}💰`);
+    }
+    else if (commandName === 'inventory') {
+        const target = interaction.options.getUser('user') ?? interaction.user;
+        const user = await Users.findOne({ where: { user_id: target.id } });
+        const items = await user?.getItems();
+
+        if (!items.length) return interaction.reply(`${target.tag} has nothing!`);
+
+        return interaction.reply(`${target.tag} currently has ${items.map((i: { amount: any; item: { name: any; }; }) => `${i.amount} ${i.item.name}`).join(', ')}`);
+    }
+});*/
 // log port and print to web dyno port cause why not?
-const PORT = process.env.PORT || 6575;
+const PORT = process.env.PORT || 6775;
 http_1.default.createServer(function (req, res) {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.write('|||||||||||||||||||||||||||||||||||||||||||||||||\n');
@@ -91,48 +114,6 @@ http_1.default.createServer(function (req, res) {
 console.log(`Server listening on ${PORT}`);
 //	Login to Discord with your client's token
 client.login(process.env.token);
-client.on('ready', async () => {
-    try {
-        await playSong();
-        console.log('Song is ready to play!');
-    }
-    catch (error) {
-        console.error(error);
-    }
-});
-client.on('messageCreate', async (message) => {
-    if (!message.guild)
-        return;
-    const channel = message.member?.voice.channel;
-    if (message.content === '-join') {
-        if (channel) {
-            try {
-                const connection = await connectToChannel(channel);
-                connection.subscribe(player);
-                message.reply('Playing now!');
-            }
-            catch (error) {
-                console.error(error);
-            }
-        }
-        else {
-            message.reply('Join a voice channel then try again!');
-        }
-    }
-    else if (message.content === '-exit') {
-        if (channel) {
-            try {
-                const connection = (0, voice_1.getVoiceConnection)(channel.guild.id);
-                if (connection) {
-                    connection.destroy();
-                }
-            }
-            catch (error) {
-                console.error(error);
-            }
-        }
-    }
-});
 //	read in command files **DEPRECATED METHOD**
 /*	client.commands = new Collection();
 const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.ts'));
@@ -169,4 +150,4 @@ for (const file of messageFiles) {
         //	console.log(message.content);
         messageEvent.execute(message);
     });
-}	*/ 
+}	*/

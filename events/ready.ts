@@ -3,7 +3,7 @@ import { DiscordClient } from '../@types/bot';
 const readyEvent = {
 	name: 'ready',
 	once: true,
-	execute(client: DiscordClient) {
+	async execute(client: DiscordClient) {
 		console.log(`Ready! Logged in as ${client?.user?.tag} ` + '😎👍');
 		console.log(`Loaded ${client.commands.size} commands.`);
 	},

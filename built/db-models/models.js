@@ -12,5 +12,5 @@ const reqString = {
 const ServerSettingsSchema = new mongoose_1.default.Schema({
     _id: reqString,
 });
-const ServerSettings = mongoose_1.default.model('<table-name>', ServerSettingsSchema);
+const ServerSettings = mongoose_1.default.model('ServerSettings', ServerSettingsSchema);
 exports.ServerSettings = ServerSettings;

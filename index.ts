@@ -1,7 +1,10 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 // import elements/types
-import { Client, Collection, Intents } from 'discord.js';
+import { Client, Collection, Formatters, Intents } from 'discord.js';
 import { DatabaseRepository, Command, DiscordClient } from './@types/bot';
 import { readCommands, readEvents, readMessageEvents } from './utils/utils';
+import { Op } from 'sequelize';
+import { Users, CurrencyShop } from './dbObjects.js';
 // import modules
 import MongoDb from './mongo';
 import dotenv from 'dotenv';
@@ -11,8 +14,8 @@ import Sequelize from 'sequelize';
 import * as fs from 'fs';
 dotenv.config();
 
-const MONGO_URI = 'mongodb+srv://' + process.env.MONGO_DB_USER + ':' + process.env.MONGO_DB_PASSWORD + '@genbot.vslua.mongodb.net/myFirstDatabase?retryWrites=true&w=majority';
-const mongo: DatabaseRepository = new MongoDb(MONGO_URI);
+// const MONGO_URI = 'mongodb+srv://' + process.env.MONGO_DB_USER + ':' + process.env.MONGO_DB_PASSWORD + '@genbot.vslua.mongodb.net/myFirstDatabase?retryWrites=true&w=majority';
+// const mongo: DatabaseRepository = new MongoDb(MONGO_URI);
 
 const myIntents = new Intents();
 myIntents.add(Intents.FLAGS.GUILDS, Intents.FLAGS.GUILD_MESSAGES, Intents.FLAGS.GUILD_MESSAGE_TYPING);
@@ -20,8 +23,33 @@ myIntents.add(Intents.FLAGS.GUILDS, Intents.FLAGS.GUILD_MESSAGES, Intents.FLAGS.
 // create a new client instance
 const client: DiscordClient = new Client({ intents: myIntents }) as DiscordClient;
 client.commands = new Collection<string, Command>();
-client.db = mongo;
+// client.db = mongo;
 
+/* // Collection to cache user currency amounts
+const currency = new Collection();
+// Defining collection helper methods
+Reflect.defineProperty(currency, 'add', {
+	value: async (id: unknown, amount: any) => {
+		const user: any = currency.get(id);
+
+		if (user) {
+			user.balance += Number(amount);
+			return user.save();
+		}
+
+		const newUser = await Users.create({ user_id: id, balance: amount });
+		currency.set(id, newUser);
+
+		return newUser;
+	},
+});
+
+Reflect.defineProperty(currency, 'getBalance', {
+	value: (id: unknown) => {
+		const user:any = currency.get(id);
+		return user ? user.balance : 0;
+	},
+}); */
 // read in command files
 readCommands().then((commands) => {
 	commands.forEach((cmd: Command) => {
@@ -54,8 +82,37 @@ readMessageEvents().then((messageEvents) => {
 	console.log(`Loaded ${messageEvents.length} message events.`);
 });
 
+/* client.once('ready', async () => {
+	const storedBalances = await Users.findAll();
+	storedBalances.forEach(b => {
+		// @ts-expect-error b is from a database and such user_id cannot import type
+		currency.set(b.user_id, b);
+	});
+});
+
+client.on('interactionCreate', async interaction => {
+	if (!interaction.isCommand()) return;
+
+	const { commandName } = interaction;
+
+	if (commandName === 'balance') {
+		const target = interaction.options.getUser('user') ?? interaction.user;
+
+		return interaction.reply(`${target.tag} has ${currency.getBalance(target.id)}💰`);
+	}
+	else if (commandName === 'inventory') {
+		const target = interaction.options.getUser('user') ?? interaction.user;
+		const user = await Users.findOne({ where: { user_id: target.id } });
+		const items = await user?.getItems();
+
+		if (!items.length) return interaction.reply(`${target.tag} has nothing!`);
+
+		return interaction.reply(`${target.tag} currently has ${items.map((i: { amount: any; item: { name: any; }; }) => `${i.amount} ${i.item.name}`).join(', ')}`);
+	}
+});*/
+
 // log port and print to web dyno port cause why not?
-const PORT = process.env.PORT || 6575;
+const PORT = process.env.PORT || 6775;
 http.createServer(function(req, res) {
 	res.writeHead(200, { 'Content-Type': 'text/plain' });
 	res.write('|||||||||||||||||||||||||||||||||||||||||||||||||\n');

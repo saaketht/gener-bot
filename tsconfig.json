@@ -9,6 +9,8 @@
     "strict": true,
     "checkJs": true,
     "allowJs": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "moduleResolution": "node",
     "types": ["node"],
     "lib": ["es6", "dom"],

@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const readyEvent = {
     name: 'ready',
     once: true,
-    execute(client) {
+    async execute(client) {
         console.log(`Ready! Logged in as ${client?.user?.tag} ` + '😎👍');
         console.log(`Loaded ${client.commands.size} commands.`);
     },
@@ -17,4 +17,4 @@ exports.default = readyEvent;
         }
         console.log(`Ready! Logged in as ${client.user.tag} ` + '😎👍');
     });
-}; */
+}; */ 

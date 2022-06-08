@@ -43,12 +43,12 @@ module.exports = {
             if (searchQuery.length > 0) {
                 console.log('search query: ' + searchQuery.join('+'));
                 const response = await openai.createCompletion('text-' + modelName + '-001', {
-                    prompt: 'generBot is the rapper tupac:\n\nYou: ' + searchQuery.join(' ') + '\ngenerBot:',
-                    temperature: 0.9,
+                    prompt: searchQuery.join(' '),
+                    temperature: 0,
                     max_tokens: maxTokens,
-                    top_p: 0.5,
-                    frequency_penalty: 2.0,
-                    presence_penalty: -2.0,
+                    top_p: 1.0,
+                    frequency_penalty: 0.0,
+                    presence_penalty: 0.0,
                 });
                 const choice = response.data.choices;
                 const choiceInfo = choice[0];
@@ -60,5 +60,5 @@ module.exports = {
     },
 };
 function checkIndex(string) {
-    return string === activationStr;
+    return (string === activationStr || string === 'gener');
 }

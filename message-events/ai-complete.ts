@@ -1,4 +1,5 @@
 import { Configuration, OpenAIApi } from 'openai';
+import { Message } from 'discord.js';
 import dotenv from 'dotenv';
 dotenv.config();
 // const clientId = process.env.privilegedIds;
@@ -6,7 +7,7 @@ const openAiApiKey = process.env.openAiKey;
 const activationStr = 'ai-complete';
 module.exports = {
 	name: 'ai-complete',
-	async execute(message: { author: { bot: any; username: string | string[]; }; content: string; reply: (arg0: any) => void; }) {
+	async execute(message: Message) {
 		if (message.author.bot) return;
 		const command = message.content.toLowerCase().split(' ');
 		// console.log(command);
@@ -37,12 +38,12 @@ module.exports = {
 			if (searchQuery.length > 0) {
 				console.log('search query: ' + searchQuery.join('+'));
 				const response = await openai.createCompletion('text-' + modelName + '-001', {
-					prompt: 'generBot is a very humorous chatbot that has strong opinions on pop culture:\n\nYou: ' + searchQuery.join(' ') + '\ngenerBot:',
-					temperature: 0.9,
+					prompt: searchQuery.join(' '),
+					temperature: 0,
 					max_tokens: maxTokens,
-					top_p: 0.5,
-					frequency_penalty: 1.5,
-					presence_penalty: 1.0,
+					top_p: 1.0,
+					frequency_penalty: 0.0,
+					presence_penalty: 0.0,
 				});
 				const choice: any = response.data.choices;
 				const choiceInfo: any = choice[0];
@@ -56,5 +57,5 @@ module.exports = {
 };
 
 function checkIndex(string: string) {
-	return string === activationStr;
+	return (string === activationStr || string === 'gener');
 }
