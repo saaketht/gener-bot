@@ -50,6 +50,7 @@ Reflect.defineProperty(currency, 'getBalance', {
 		return user ? user.balance : 0;
 	},
 }); */
+
 // read in command files
 readCommands().then((commands) => {
 	commands.forEach((cmd: Command) => {

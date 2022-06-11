@@ -12,6 +12,12 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # Files
 config.json
 
+# Built files
+built/
+
+# vscode files
+.vscode/
+
 # Runtime data
 pids
 *.pid
