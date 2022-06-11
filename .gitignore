@@ -10,6 +10,7 @@ lerna-debug.log*
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Files
+tsconfig.json
 config.json
 
 # Built files
@@ -17,6 +18,9 @@ built/
 
 # vscode files
 .vscode/
+
+# shell scripts
+*.sh
 
 # Runtime data
 pids
