@@ -1,6 +1,6 @@
 // const currencies = new Map('bruh', 'crazy', );
-import fetch from 'node-fetch';
 import { Message } from 'discord.js';
+import fetch from 'node-fetch';
 const foodCategories = ['burger', 'dessert', 'pasta', 'pizza'];
 const indianFood = ['biryani', 'butter-chicken', 'dosa', 'idly', 'rice', 'samosa'];
 const rolls = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣'];
@@ -101,6 +101,9 @@ module.exports = {
 		}
 		else if (command.includes('ski')) {
 			message.reply('https://cdn.discordapp.com/attachments/945820129457995836/950996673117704192/IMG_6429.jpg');
+		}
+		else if (command.includes('blunt')) {
+			message.reply('https://media.discordapp.net/attachments/945820129457995836/984260637293170768/IMG_6613.jpg');
 		}
 	},
 };
