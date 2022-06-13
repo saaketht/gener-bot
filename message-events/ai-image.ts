@@ -72,27 +72,22 @@ module.exports = {
 			background.src = image;
 			context.drawImage(background, 0, 0, canvas.width, canvas.height);
 			const attachment = new MessageAttachment(canvas.toBuffer('image/png'), 'image.png');
-			message.reply({ files: [attachment] });
 
 
-			/* const s3Params: BucketParams = {
+			const s3Params: BucketParams = {
 				Bucket: S3Bucket,
 				Key: imageBucketKey,
-				Body: decoded,
+				Body: image,
 			};
 			let output: any;
 			if (S3Bucket === '') {
 				console.log('No Bucket Name Found!');
 			}
 			else {
-				//output = s3PutCommand(s3Params);
+				output = s3PutCommand(s3Params);
 			}
-			console.log(output); */
-			// console.log('sending a really long ' + typeof bigIntParsed[0] + ' to be embedded as a url to ai generated image');
-			// console.log(decoded);
-			// message.reply(hugeURL);
-
-
+			console.log(output);
+			message.reply({ files: [attachment] });
 		}
 	},
 };
