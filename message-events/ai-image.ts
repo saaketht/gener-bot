@@ -1,12 +1,18 @@
-import { Message } from 'discord.js';
-import { S3Client } from '@aws-sdk/client-s3';
-const REGION = 'us-east-1';
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
+import { Message, MessageAttachment } from 'discord.js';
+import { readFile } from 'fs/promises';
+import { BucketParams } from '../@types/bot/BucketParams';
+import { s3PutCommand } from '../libs/s3_create_and_upload_object';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const imageDataURI = require('image-data-uri');
+import Canvas from '@napi-rs/canvas';
 import fetch from 'node-fetch';
-import dotenv from 'dotenv';
 import JsonBigint from 'json-bigint';
+import dotenv from 'dotenv';
 dotenv.config();
 
 const REQUEST_TIMEOUT_SEC = 60000;
+const S3Bucket: string = process.env.S3_BUCKET_NAME || '';
 // const clientId = process.env.privilegedIds;
 const activationStr = 'ai-image';
 module.exports = {
@@ -25,9 +31,9 @@ module.exports = {
 				// console.log(command[index]);
 				searchQuery.push(command[index]);
 			}
-			const backendUrl = 'https://hip-clubs-reply-35-196-71-172.loca.lt/';
+			const backendUrl = 'https://sour-kings-chew-34-80-170-5.loca.lt/';
 			const text = searchQuery.join(' ');
-			const res: any = await Promise.race([
+			const result: any = await Promise.race([
 				(await fetch(backendUrl + '/dalle', {
 					method: 'POST',
 					headers: {
@@ -47,18 +53,46 @@ module.exports = {
 				})).text(), new Promise((_, reject) => setTimeout(
 					() => reject(new Error('Timeout')), REQUEST_TIMEOUT_SEC)),
 			]);
-			/* TODO: upload image by sending data URL to AWS S3 so that shorter links can be made
-			and so images can be saved for later for whatever reason */
-			const s3Client = new S3Client({ region: REGION });
-
-
+			// console.log(typeof result[0]);
 			const urlMaker = 'data:image/png;base64,';
-			const bigIntParsed = JsonBigint.parse(res);
+			const bigIntParsed = JsonBigint.parse(result);
 			const hugeURL = urlMaker + bigIntParsed[0];
-			const imageRes = await fetch(hugeURL).then(response => response.json());
-			console.log('sending a really long ' + typeof bigIntParsed[0] + ' to be embedded as a url to ai generated image');
-			console.log(imageRes);
-			message.reply(imageRes);
+			const timestamp = Date.now();
+			const imageBucketKey = message.author.id + searchQuery.join('_') + timestamp;
+
+			const path = './tempDalleDir/' + imageBucketKey;
+
+			const loc = await imageDataURI.outputFile(hugeURL, path).then((res: any) => console.log(res));
+			console.log('img key generated!: ' + imageBucketKey + ', stored at: ' + loc);
+
+			const canvas = Canvas.createCanvas(256, 256);
+			const context = canvas.getContext('2d');
+			const image = await readFile(path + '.png');
+			const background = new Canvas.Image();
+			background.src = image;
+			context.drawImage(background, 0, 0, canvas.width, canvas.height);
+			const attachment = new MessageAttachment(canvas.toBuffer('image/png'), 'image.png');
+			message.reply({ files: [attachment] });
+
+
+			/* const s3Params: BucketParams = {
+				Bucket: S3Bucket,
+				Key: imageBucketKey,
+				Body: decoded,
+			};
+			let output: any;
+			if (S3Bucket === '') {
+				console.log('No Bucket Name Found!');
+			}
+			else {
+				//output = s3PutCommand(s3Params);
+			}
+			console.log(output); */
+			// console.log('sending a really long ' + typeof bigIntParsed[0] + ' to be embedded as a url to ai generated image');
+			// console.log(decoded);
+			// message.reply(hugeURL);
+
+
 		}
 	},
 };

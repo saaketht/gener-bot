@@ -10,6 +10,8 @@ declare global {
         DB_NAME: string;
         MONGO_DB_USER: string;
         MONGO_DB_PASSWORD: string;
+        AWS_REGION: string;
+        S3_BUCKET_NAME: string;
       }
     }
 }
