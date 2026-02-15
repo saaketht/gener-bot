@@ -1,18 +1,26 @@
 declare global {
     namespace NodeJS {
-      interface ProcessEnv {
-        guildId: string;
-        clientId: string;
-        token: string;
-        privilegedIds: string;
-        rapidApiKey: string;
-        openAiKey: string;
-        DB_NAME: string;
-        MONGO_DB_USER: string;
-        MONGO_DB_PASSWORD: string;
-        AWS_REGION: string;
-        S3_BUCKET_NAME: string;
-      }
+        interface ProcessEnv {
+            // Discord
+            guildId: string;
+            clientId: string;
+            token: string;
+            privilegedIds: string;
+            // AI
+            ANTHROPIC_API_KEY: string;
+            openAiKey: string;
+            // APIs
+            rapidApiKey: string;
+            SEARCH_API_KEY: string;
+            // Database
+            DB_NAME: string;
+            MONGO_DB_USER: string;
+            MONGO_DB_PASSWORD: string;
+            // Runtime
+            NODE_ENV: string;
+            PORT: string;
+            LOG_LEVEL: string;
+        }
     }
 }
 export {};
