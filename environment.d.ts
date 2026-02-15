@@ -8,6 +8,7 @@ declare global {
             privilegedIds: string;
             // AI
             ANTHROPIC_API_KEY: string;
+            AI_SYSTEM_PROMPT: string;
             openAiKey: string;
             // APIs
             rapidApiKey: string;
