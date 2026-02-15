@@ -9,11 +9,11 @@ lerna-debug.log*
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
-# Files
-*.json
-
 # Built files
 built/
+
+# archive dirs
+archive/
 tempDalleDir/
 
 # vscode files
@@ -115,3 +115,15 @@ dist
 
 # TernJS port file
 .tern-port
+
+# OS files
+.DS_Store
+Icon?
+
+# Runtime data files
+database.sqlite
+*.sqlite
+data/
+
+# Temp/scratch
+temp/
