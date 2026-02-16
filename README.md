@@ -85,4 +85,4 @@ npm run lint      # ESLint with TypeScript rules
 
 ## License
 
-[ISC](LICENSE)
+[Apache License 2.0](LICENSE)
