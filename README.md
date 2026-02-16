@@ -3,7 +3,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.4-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![discord.js](https://img.shields.io/badge/discord.js-v14-5865F2?logo=discord&logoColor=white)](https://discord.js.org/)
 [![Claude AI](https://img.shields.io/badge/Claude_Haiku_4.5-Anthropic-D97706?logo=anthropic&logoColor=white)](https://www.anthropic.com/)
-[![License: ISC](https://img.shields.io/badge/License-ISC-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 A Discord bot exploring **event-driven architecture**, **third-party API integration**, and **real-time AI** — built with TypeScript and discord.js v14.
 
