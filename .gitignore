@@ -127,3 +127,6 @@ data/
 
 # Temp/scratch
 temp/
+
+# AI assistant context
+CLAUDE.md

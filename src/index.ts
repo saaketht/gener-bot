@@ -3,33 +3,16 @@
 import { Client, Collection, GatewayIntentBits } from 'discord.js';
 import { DatabaseRepository, Command, DiscordClient } from './types';
 import { readCommands, readEvents, readMessageEvents } from './utils/loader';
-// music imports
-/*
-import { MusicPlayer } from './music/MusicPlayer';
-import { Ping } from './music/Ping';
-import { getConfig, setConfig } from './music/Config';
-import { getCmd, getArg, removeLinkMarkdown, prefixify } from './music/Utils';
-import { Config } from './music/Types';
-*/
 // import modules
-import Items from 'warframe-items';
-import Fuse from 'fuse.js';
 import dotenv from 'dotenv';
 import http from 'http';
-import * as chalk from 'chalk';
-import * as fs from 'fs';
 import path from 'path';
 import { GameEngine } from './game/GameEngine';
 import { GameStorage } from './game/GameStorage';
 dotenv.config();
 
-// TODO: fix abort controller for streams
-// import foo = require('node-abort-controller');
-// global.AbortController = foo.AbortController;
-
 // create a new database instance
 export type GuildID = string;
-// export const MusicPlayers = new Collection<GuildID, MusicPlayer>();
 
 // create a new client instance
 const client: DiscordClient = new Client({
@@ -62,9 +45,6 @@ for (const threadId of savedGameIds) {
 if (savedGameIds.length > 0) {
 	console.log(`Restored ${client.activeGames.size} adventure games from disk.`);
 }
-
-// Initialize Items object with ALL category
-const itemObj = new Items({ category: ['All'] });
 
 // read in message event files
 readMessageEvents().then((messageEvents) => {
