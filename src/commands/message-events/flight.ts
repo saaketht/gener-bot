@@ -1,4 +1,4 @@
-import { Message, TextChannel } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, Message, TextChannel } from 'discord.js';
 import { MessageEvent } from '../../types';
 import { TrackedFlights } from '../../models/dbObjects';
 import { fetchFlightStatus } from '../../utils/flightApi';
@@ -40,16 +40,26 @@ const messageEvent: MessageEvent = {
 
 				if (data) {
 					const embed = getFlightTrackingEmbed(data, message.author);
-					await channel.send({ embeds: [embed] });
+					const refreshButton = new ButtonBuilder()
+						.setCustomId(`flight_refresh_${f.id}`)
+						.setLabel('Refresh')
+						.setStyle(ButtonStyle.Secondary)
+						.setEmoji('🔄');
+					const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(refreshButton);
+					await channel.send({ embeds: [embed], components: [actionRow] });
 
-					// update cached data
 					await f.update({ last_api_data: JSON.stringify(data), status: data.status.toLowerCase() });
 				}
 				else if (f.last_api_data) {
-					// use cached data if API fails
 					const cached = JSON.parse(f.last_api_data);
 					const embed = getFlightTrackingEmbed(cached, message.author);
-					await channel.send({ embeds: [embed] });
+					const refreshButton = new ButtonBuilder()
+						.setCustomId(`flight_refresh_${f.id}`)
+						.setLabel('Refresh')
+						.setStyle(ButtonStyle.Secondary)
+						.setEmoji('🔄');
+					const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(refreshButton);
+					await channel.send({ embeds: [embed], components: [actionRow] });
 				}
 				else {
 					await channel.send({ embeds: [getFlightErrorEmbed(`Could not fetch data for ${f.flight_number}.`)] });

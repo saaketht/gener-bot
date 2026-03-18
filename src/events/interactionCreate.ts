@@ -1,11 +1,38 @@
 import { Guild, Interaction } from 'discord.js';
 import { DiscordClient } from '../types';
+import { rateLimiter } from '../utils/rateLimiter';
+import logger from '../utils/logger';
 
 const interactionCreateEvent = {
 	name: 'interactionCreate',
 	async execute(interaction: Interaction) {
-		if (!interaction.isChatInputCommand()) return;
 		const client = interaction.client as DiscordClient;
+
+		// handle button interactions
+		if (interaction.isButton()) {
+			if (interaction.customId.startsWith('flight_refresh_')) {
+				const dbRowId = parseInt(interaction.customId.split('_')[2]);
+				if (isNaN(dbRowId)) return;
+
+				if (!rateLimiter(interaction.user.id, 'flight_refresh', 3, 30000)) {
+					await interaction.reply({ content: 'Slow down — try again in a few seconds.', ephemeral: true });
+					return;
+				}
+
+				try {
+					await interaction.deferUpdate();
+					if (client.flightTracker) {
+						await client.flightTracker.pollAndUpdate(dbRowId);
+					}
+				}
+				catch (error) {
+					logger.error('Error handling flight refresh button', { error });
+				}
+			}
+			return;
+		}
+
+		if (!interaction.isChatInputCommand()) return;
 		const command = client.commands.get(interaction.commandName);
 
 		if (!command) return;
@@ -27,25 +54,3 @@ const interactionCreateEvent = {
 };
 
 export default interactionCreateEvent;
-
-// PRE-TYPESCRIPT CODE **DEPRECATED**
-/* module.exports = {
-	name: 'interactionCreate',
-	execute(interaction) {
-		console.log(`${interaction.user.tag} in #${interaction.channel.name} triggered an interaction. Interaction: ${interaction}`);
-	},
-}; */
-
-// TYPESCRIPT FIRST ATTEMPT? **DEPRECATED**
-/* export default (client: Client): void => {
-	client.on('interactionCreate', async (interaction: Interaction) => {
-		if (interaction.isCommand() || interaction.isContextMenu()) {
-			await handleSlashCommand(client, interaction);
-			console.log(`${interaction.user.tag} in #${interaction.channelId} triggered an interaction. Interaction: ${interaction.commandName}`);
-		}
-	})
-}
-
-const handleSlashCommand = async (client: Client, interaction: BaseCommandInteraction): Promise<void> => {
-    // handle slash command here
-}; */

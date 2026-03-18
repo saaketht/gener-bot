@@ -2,6 +2,7 @@ import { Sequelize } from 'sequelize';
 import { currencyShop } from './CurrencyShop';
 import { userItems } from './UserItems';
 import { users } from './Users';
+import { trackedFlights } from './TrackedFlights';
 
 const sequelize = new Sequelize('database', 'username', 'password', {
 	host: 'localhost',
@@ -13,6 +14,7 @@ const sequelize = new Sequelize('database', 'username', 'password', {
 const CurrencyShop = currencyShop(sequelize);
 const UserItems = userItems(sequelize);
 const Users = users(sequelize);
+const TrackedFlights = trackedFlights(sequelize);
 
 UserItems.belongsTo(CurrencyShop, { foreignKey: 'item_id', as: 'item' });
 
@@ -46,4 +48,5 @@ export {
 	Users,
 	CurrencyShop,
 	UserItems,
+	TrackedFlights,
 };

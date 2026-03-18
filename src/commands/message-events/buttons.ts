@@ -1,8 +1,9 @@
-import { EmbedBuilder, Message } from 'discord.js';
+import { EmbedBuilder } from 'discord.js';
+import { MessageEvent } from '../../types';
 
-module.exports = {
+const messageEvent: MessageEvent = {
 	name: 'buttons',
-	async execute(message: Message) {
+	async execute(message) {
 		if (message.author.bot) return;
 		const command = message.content.toLowerCase().split(' ');
 		if (command.includes('embedtest')) {
@@ -23,8 +24,9 @@ module.exports = {
 				.setTimestamp()
 				.setFooter({ text: 'Some footer text here', iconURL: 'http://1.bp.blogspot.com/-1rGY7U_HKuM/TgltFHC-tgI/AAAAAAAADG4/75iXHaKLX6Q/s1600/abstract+background+%25285%2529.jpg' });
 
-			// await message.reply({ embeds: [exampleEmbed] });
 			await message.reply({ embeds: [exampleEmbed] });
 		}
 	},
 };
+
+export default messageEvent;

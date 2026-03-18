@@ -1,8 +1,9 @@
 import { getWarframeItemEmbed } from '../../embeds/embeds';
-import { Message } from 'discord.js';
+import { MessageEvent } from '../../types';
 import WarframeItem from '../../interfaces/wf-item';
 import Items from 'warframe-items';
 import Fuse from 'fuse.js';
+import logger from '../../utils/logger';
 
 // Initialize items and fuzzy search once at module load
 const items = new Items({ category: ['All'] });
@@ -35,83 +36,81 @@ const prepareItemForDisplay = (entry: WarframeItem): WarframeItem => {
 	return entry;
 };
 
-module.exports = {
+const messageEvent: MessageEvent = {
 	name: 'warframe',
-	aliases: ['wf', 'warframe'],
-	description: 'Search for a Warframe item.',
-	usage: '<item>',
-	async execute(message: Message) {
+	async execute(message) {
 		if (message.author.bot) return;
 
 		const command = message.content.toLowerCase().split(' ');
 
-		if (command[0] === 'wf' || command[0] === 'warframe') {
-			const searchQuery = command.slice(1);
-			const query = searchQuery.join(' ').trim();
+		if (command[0] !== 'wf' && command[0] !== 'warframe') return;
 
-			if (!query) {
-				message.reply('Please enter an item to search for.');
-				return;
-			}
+		const query = command.slice(1).join(' ').trim();
 
-			console.log(`Warframe search: "${query}"`);
-
-			// 1. Try exact match first (case-insensitive)
-			const exactMatch = items.find(
-				(i) => i.name?.toLowerCase() === query.toLowerCase(),
-			);
-
-			if (exactMatch) {
-				console.log(`Exact match found: ${exactMatch.name}`);
-				const entry = prepareItemForDisplay(exactMatch as WarframeItem);
-
-				if (!entry.name) {
-					message.reply(`'${query}' has invalid data.`);
-					return;
-				}
-
-				message.reply({
-					embeds: [getWarframeItemEmbed(message.author, entry)],
-				});
-				return;
-			}
-
-			// 2. Try fuzzy search
-			const fuzzyResults = fuse.search(query);
-
-			if (fuzzyResults.length === 0) {
-				message.reply(`'${query}' not found.`);
-				console.log('Item not found (no fuzzy matches)');
-				return;
-			}
-
-			const topResult = fuzzyResults[0];
-			console.log(`Fuzzy search top result: ${topResult.item.name} (score: ${topResult.score?.toFixed(3)})`);
-
-			// 3. If top result is good enough, use it
-			if (topResult.score !== undefined && topResult.score < FUZZY_AUTO_SELECT_THRESHOLD) {
-				const entry = prepareItemForDisplay(topResult.item as WarframeItem);
-
-				if (!entry.name) {
-					message.reply(`'${query}' has invalid data.`);
-					return;
-				}
-
-				message.reply({
-					embeds: [getWarframeItemEmbed(message.author, entry)],
-				});
-				return;
-			}
-
-			// 4. Show "Did you mean?" suggestions
-			const suggestions = fuzzyResults
-				.slice(0, 5)
-				.map(r => r.item.name)
-				.filter((name): name is string => name !== undefined)
-				.join(', ');
-
-			message.reply(`'${query}' not found. Did you mean: ${suggestions}?`);
-			console.log(`Suggesting alternatives: ${suggestions}`);
+		if (!query) {
+			message.reply('Please enter an item to search for.');
+			return;
 		}
+
+		logger.debug(`Warframe search: "${query}"`);
+
+		// 1. Try exact match first (case-insensitive)
+		const exactMatch = items.find(
+			(i) => i.name?.toLowerCase() === query.toLowerCase(),
+		);
+
+		if (exactMatch) {
+			logger.debug(`Exact match found: ${exactMatch.name}`);
+			const entry = prepareItemForDisplay(exactMatch as WarframeItem);
+
+			if (!entry.name) {
+				message.reply(`'${query}' has invalid data.`);
+				return;
+			}
+
+			message.reply({
+				embeds: [getWarframeItemEmbed(message.author, entry)],
+			});
+			return;
+		}
+
+		// 2. Try fuzzy search
+		const fuzzyResults = fuse.search(query);
+
+		if (fuzzyResults.length === 0) {
+			message.reply(`'${query}' not found.`);
+			logger.debug('Item not found (no fuzzy matches)');
+			return;
+		}
+
+		const topResult = fuzzyResults[0];
+		logger.debug(`Fuzzy search top result: ${topResult.item.name} (score: ${topResult.score?.toFixed(3)})`);
+
+		// 3. If top result is good enough, use it
+		if (topResult.score !== undefined && topResult.score < FUZZY_AUTO_SELECT_THRESHOLD) {
+			const entry = prepareItemForDisplay(topResult.item as WarframeItem);
+
+			if (!entry.name) {
+				message.reply(`'${query}' has invalid data.`);
+				return;
+			}
+
+			message.reply({
+				embeds: [getWarframeItemEmbed(message.author, entry)],
+			});
+			return;
+		}
+
+		// 4. Show "Did you mean?" suggestions
+		const suggestions = fuzzyResults
+			.slice(0, 5)
+			.map(r => r.item.name)
+			.filter((name): name is string => name !== undefined)
+			.join(', ');
+
+		message.reply(`'${query}' not found. Did you mean: ${suggestions}?`);
+		logger.debug(`Suggesting alternatives: ${suggestions}`);
 	},
 };
+
+export default messageEvent;
