@@ -59,8 +59,17 @@ async function handleTrack(client: DiscordClient, interaction: ChatInputCommandI
 		return;
 	}
 
-	// default to today
-	const date = dateInput ?? new Date().toISOString().split('T')[0];
+	// default to today (UTC), but also try yesterday if no explicit date
+	// since the server may be in UTC while the user is in an earlier timezone
+	let date: string;
+	let autoDate = false;
+	if (dateInput) {
+		date = dateInput;
+	}
+	else {
+		date = new Date().toISOString().split('T')[0];
+		autoDate = true;
+	}
 	if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
 		await interaction.reply({
 			embeds: [getFlightErrorEmbed('Invalid date format. Use `YYYY-MM-DD`.')],
@@ -88,6 +97,7 @@ async function handleTrack(client: DiscordClient, interaction: ChatInputCommandI
 			flight_number: flightNumber,
 			flight_date: date,
 			active: true,
+			expires_at: { [Op.gt]: new Date() },
 		},
 	});
 	if (existing) {
@@ -101,7 +111,20 @@ async function handleTrack(client: DiscordClient, interaction: ChatInputCommandI
 	await interaction.deferReply();
 
 	// fetch initial status to validate flight exists
-	const data = await fetchFlightStatus(flightNumber, date);
+	let data = await fetchFlightStatus(flightNumber, date);
+
+	// if no date was provided and UTC "today" failed, try yesterday
+	// handles timezone mismatch (server in UTC, user in e.g. EST)
+	if (!data && autoDate) {
+		const yesterday = new Date();
+		yesterday.setDate(yesterday.getDate() - 1);
+		const yesterdayStr = yesterday.toISOString().split('T')[0];
+		data = await fetchFlightStatus(flightNumber, yesterdayStr);
+		if (data) {
+			date = yesterdayStr;
+		}
+	}
+
 	if (!data) {
 		await interaction.editReply({
 			embeds: [getFlightErrorEmbed(`Could not find flight **${flightNumber}** on ${date}. Check the flight number and date.`)],
@@ -110,8 +133,9 @@ async function handleTrack(client: DiscordClient, interaction: ChatInputCommandI
 	}
 
 	// create DB row
+	// 48h buffer so flights crossing midnight/timezones don't expire prematurely
 	const expiresAt = new Date(date);
-	expiresAt.setDate(expiresAt.getDate() + 1);
+	expiresAt.setDate(expiresAt.getDate() + 2);
 
 	const embed = getFlightTrackingEmbed(data, interaction.user);
 	const refreshButton = new ButtonBuilder()
