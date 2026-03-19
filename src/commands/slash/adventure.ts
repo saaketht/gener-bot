@@ -33,7 +33,8 @@ const adventureCommand: Command = {
 			// Create the thread
 			const thread = await interaction.channel.threads.create({
 				name: `⚔️ ${interaction.user.username}'s Adventure`,
-				autoArchiveDuration: 1440, // 24 hours
+				// 24 hours
+				autoArchiveDuration: 1440,
 				reason: 'Text adventure game',
 			});
 
@@ -92,7 +93,8 @@ const adventureCommand: Command = {
 			await interaction.editReply(`Adventure started! Head to ${thread} to begin your quest.`);
 
 			logger.info(`Adventure started by ${interaction.user.username} in thread ${thread.id}`);
-		} catch (error) {
+		}
+		catch (error) {
 			logger.error('Failed to start adventure:', error);
 			await interaction.editReply('Failed to start adventure. Please try again.');
 		}

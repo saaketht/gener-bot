@@ -1,4 +1,4 @@
-import { GameState, GameResult, Player, StatChange, Item } from './types';
+import { GameState, GameResult, Player } from './types';
 import { DeterministicSystems } from './DeterministicSystems';
 import { LLMNarrator } from './LLMNarrator';
 import { SceneManager } from './SceneManager';
@@ -70,7 +70,7 @@ export class GameEngine {
 				case 'health':
 					player.stats.health = Math.min(
 						player.stats.maxHealth,
-						Math.max(0, player.stats.health + change.change)
+						Math.max(0, player.stats.health + change.change),
 					);
 					break;
 				case 'gold':
@@ -119,7 +119,8 @@ export class GameEngine {
 				this.state.narrativeSummary = summary;
 				this.state.recentActions = this.state.recentActions.slice(-3);
 			}
-		} catch (error) {
+		}
+		catch (error) {
 			logger.error('Failed to compress narrative:', error);
 		}
 	}
@@ -146,7 +147,8 @@ export class GameEngine {
 			player.stats.level++;
 			player.stats.experience -= xpNeeded;
 			player.stats.maxHealth += 10;
-			player.stats.health = player.stats.maxHealth; // full heal on level up
+			// Full heal on level up
+			player.stats.health = player.stats.maxHealth;
 			return true;
 		}
 		return false;

@@ -29,28 +29,25 @@ export function getStockQuoteEmbed(quote: GlobalQuote): EmbedBuilder {
 	const price = parseFloat(quote['05. price']);
 	const change = parseFloat(quote['09. change']);
 	const changePct = parseFloat(quote['10. change percent']?.replace('%', ''));
-	const prevClose = parseFloat(quote['08. previous close']);
-
 	const isUp = change >= 0;
 	const arrow = isUp ? '🟢 ▲' : '🔴 ▼';
 	const sign = isUp ? '+' : '';
-	const color = isUp ? 0x10B981 : 0xEF4444; // green / red
-
-	const open = parseFloat(quote['02. open']);
+	const color = isUp ? 0x10B981 : 0xEF4444;
 	const high = parseFloat(quote['03. high']);
 	const low = parseFloat(quote['04. low']);
 	const range = high - low;
 
 	// Price position within day's range (for the bar)
 	const barLen = 12;
-	const pos = range > 0 ? Math.round(((price - low) / range) * (barLen - 1)) : Math.floor(barLen / 2);
+	const rawPos = range > 0 ? Math.round(((price - low) / range) * (barLen - 1)) : Math.floor(barLen / 2);
+	const pos = Math.max(0, Math.min(barLen - 1, rawPos));
 	const bar = '░'.repeat(pos) + '█' + '░'.repeat(barLen - 1 - pos);
 
 	return new EmbedBuilder()
 		.setColor(color)
 		.setTitle(`${quote['01. symbol']}  ${arrow} $${fmt(quote['05. price'])}`)
 		.setDescription(
-			`${isUp ? '🟢' : '🔴'} ${sign}$${fmt(quote['09. change'])} (${sign}${changePct.toFixed(2)}%) from prev close`
+			`${isUp ? '🟢' : '🔴'} ${sign}$${fmt(quote['09. change'])} (${sign}${changePct.toFixed(2)}%) from prev close`,
 		)
 		.addFields(
 			{ name: 'Open', value: `$${fmt(quote['02. open'])}`, inline: true },
@@ -87,7 +84,7 @@ export function getCryptoEmbed(rate: CurrencyExchangeRate): EmbedBuilder {
 	const symbol = rate['1. From_Currency Code'];
 
 	return new EmbedBuilder()
-		.setColor(0xF7931A) // bitcoin orange — works as a general crypto color
+		.setColor(0xF7931A)
 		.setTitle(`${name} (${symbol})`)
 		.setDescription(`**$${formatted}** USD`)
 		.addFields(

@@ -9,7 +9,9 @@
     "deploy": "ts-node src/deploy-commands.ts",
     "build": "tsc",
     "dev": "nodemon src/index.ts",
-    "start": "ts-node src/index.ts"
+    "start": "ts-node src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [
     "discord",
@@ -41,7 +43,8 @@
     "ts-node": "^10.9.1",
     "tsconfig-paths": "^3.14.1",
     "tslib": "^2.5.0",
-    "typescript": "~5.4"
+    "typescript": "~5.4",
+    "vitest": "^4.1.0"
   },
   "repository": {
     "type": "git",

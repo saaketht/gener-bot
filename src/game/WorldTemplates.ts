@@ -1,4 +1,4 @@
-import { Room, Item, NPC } from './types';
+import { Room } from './types';
 
 export function createStarterWorld(): Record<string, Room> {
 	const rooms: Record<string, Room> = {};

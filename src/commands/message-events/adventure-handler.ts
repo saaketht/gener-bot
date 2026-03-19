@@ -34,10 +34,18 @@ const adventureHandler: MessageEvent = {
 		const lower = content.toLowerCase();
 
 		// Meta commands
-		if (lower === '!join') { await handleJoin(message, engine); return; }
-		if (lower === '!party') { await handleParty(message, engine); return; }
-		if (lower === '!quit') { await handleQuit(message, engine); return; }
-		if (lower.startsWith('!mode ')) { await handleMode(message, engine); return; }
+		if (lower === '!join') {
+			await handleJoin(message, engine); return;
+		}
+		if (lower === '!party') {
+			await handleParty(message, engine); return;
+		}
+		if (lower === '!quit') {
+			await handleQuit(message, engine); return;
+		}
+		if (lower.startsWith('!mode ')) {
+			await handleMode(message, engine); return;
+		}
 
 		// Rate limit game actions: 15 per minute
 		if (!rateLimiter(message.author.id, 'adventure', 15, 60000)) {
@@ -51,8 +59,9 @@ const adventureHandler: MessageEvent = {
 		if (!canAct.canAct) {
 			if (canAct.reason) {
 				const reply = await message.reply(canAct.reason);
-				setTimeout(() => reply.delete().catch(() => { /* ignore */ }), 4000);
-			} else {
+				setTimeout(() => reply.delete().catch(() => undefined), 4000);
+			}
+			else {
 				await message.react('⏳');
 			}
 			return;
@@ -95,7 +104,8 @@ const adventureHandler: MessageEvent = {
 					gameStorage.saveGame(state);
 				}
 			}
-		} catch (error) {
+		}
+		catch (error) {
 			logger.error('Error processing adventure action:', error);
 			await message.reply('Something went wrong. Try again.');
 		}
@@ -117,7 +127,7 @@ async function handleJoin(message: Message, engine: GameEngine): Promise<void> {
 	const partySize = multiplayerManager.getPartySize(state);
 	await channel.send(
 		`**${message.author.username}** joined the adventure! (${partySize} player${partySize !== 1 ? 's' : ''})\n` +
-		`Party mode: **${state.party.mode}**`
+		`Party mode: **${state.party.mode}**`,
 	);
 
 	if (state.party.mode === 'turn-based') {
@@ -156,9 +166,10 @@ async function handleQuit(message: Message, engine: GameEngine): Promise<void> {
 
 		// Archive the thread
 		if (message.channel.isThread()) {
-			await message.channel.setArchived(true).catch(() => { /* ignore */ });
+			await message.channel.setArchived(true).catch(() => undefined);
 		}
-	} else {
+	}
+	else {
 		gameStorage.saveGame(state);
 	}
 

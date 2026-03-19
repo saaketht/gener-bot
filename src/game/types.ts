@@ -1,3 +1,4 @@
+/* eslint-disable no-inline-comments */
 export type Direction = 'north' | 'south' | 'east' | 'west' | 'up' | 'down';
 export type RoomFlag = 'DARK' | 'SAFE' | 'SHOP' | 'DANGEROUS' | 'PUZZLE';
 export type ItemType = 'weapon' | 'armor' | 'accessory' | 'consumable' | 'quest' | 'treasure';

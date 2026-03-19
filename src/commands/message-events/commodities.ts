@@ -71,7 +71,8 @@ const messageEvent: MessageEvent = {
 				});
 				const rate = data['Realtime Currency Exchange Rate'];
 				await message.reply({ embeds: [getCryptoEmbed(rate)] });
-			} catch (error) {
+			}
+			catch (error) {
 				logger.error('crypto error:', error);
 			}
 			return;
@@ -90,7 +91,8 @@ const messageEvent: MessageEvent = {
 				});
 				const quote = data['Global Quote'];
 				await message.reply({ embeds: [getStockQuoteEmbed(quote)] });
-			} catch (error) {
+			}
+			catch (error) {
 				logger.error('stock error:', error);
 			}
 			return;
@@ -112,7 +114,8 @@ const messageEvent: MessageEvent = {
 					return;
 				}
 				await message.reply({ embeds: [getCommodityEmbed(func, data)] });
-			} catch (error) {
+			}
+			catch (error) {
 				logger.error('commodity error:', error);
 			}
 			return;

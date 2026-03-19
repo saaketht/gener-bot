@@ -10,7 +10,8 @@ export function createGameEmbed(state: GameState, room: Room, result?: GameResul
 
 	if (result) {
 		embed.setDescription(result.message);
-	} else {
+	}
+	else {
 		embed.setDescription(buildRoomDescription(room));
 	}
 
@@ -27,7 +28,7 @@ export function createGameEmbed(state: GameState, room: Room, result?: GameResul
 	// Stat changes
 	if (result?.statChanges && result.statChanges.length > 0) {
 		const changes = result.statChanges.map(sc =>
-			`${sc.stat}: ${sc.change > 0 ? '+' : ''}${sc.change}`
+			`${sc.stat}: ${sc.change > 0 ? '+' : ''}${sc.change}`,
 		).join(' | ');
 		embed.addFields({ name: '📊 Changes', value: changes, inline: false });
 	}

@@ -30,7 +30,8 @@ const messageEvent: MessageEvent = {
 				return;
 			}
 			await message.reply(url);
-		} catch (error) {
+		}
+		catch (error) {
 			logger.error('imagesearch error:', error);
 			await message.reply('Something went wrong with the image search.');
 		}

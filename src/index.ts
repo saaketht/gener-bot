@@ -22,7 +22,7 @@ const client: DiscordClient = new Client({
 		GatewayIntentBits.GuildMessageTyping,
 		GatewayIntentBits.GuildVoiceStates,
 		GatewayIntentBits.MessageContent,
-	]
+	],
 }) as DiscordClient;
 // create a new collection for commands
 client.commands = new Collection<string, Command>();
@@ -38,7 +38,8 @@ for (const threadId of savedGameIds) {
 		if (state) {
 			client.activeGames.set(threadId, new GameEngine(state));
 		}
-	} catch (err) {
+	}
+	catch (err) {
 		console.error(`[startup] Failed to restore game ${threadId}:`, err);
 	}
 }
@@ -55,7 +56,8 @@ readMessageEvents().then((messageEvents) => {
 		for (const messageEvent of messageEvents) {
 			try {
 				await messageEvent.execute(message);
-			} catch (err) {
+			}
+			catch (err) {
 				console.error(`[messageCreate] error in ${messageEvent.name}:`, err);
 			}
 		}

@@ -24,16 +24,20 @@ export function parseNarratorResponse(response: string): GameResult {
 			if (key === 'item') {
 				if (value.startsWith('+')) {
 					itemsGained.push(createItemFromId(value.slice(1)));
-				} else if (value.startsWith('-')) {
+				}
+				else if (value.startsWith('-')) {
 					itemsLost.push(createItemFromId(value.slice(1)));
 				}
-			} else if (key === 'health' || key === 'hp') {
+			}
+			else if (key === 'health' || key === 'hp') {
 				const change = parseInt(value);
 				if (!isNaN(change)) statChanges.push({ stat: 'health', change });
-			} else if (key === 'gold' || key === 'money') {
+			}
+			else if (key === 'gold' || key === 'money') {
 				const change = parseInt(value);
 				if (!isNaN(change)) statChanges.push({ stat: 'gold', change });
-			} else if (key === 'xp' || key === 'experience' || key === 'exp') {
+			}
+			else if (key === 'xp' || key === 'experience' || key === 'exp') {
 				const change = parseInt(value);
 				if (!isNaN(change)) statChanges.push({ stat: 'experience', change });
 			}

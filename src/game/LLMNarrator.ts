@@ -63,7 +63,8 @@ export class LLMNarrator {
 			logger.info(`adventure LLM tokens: input=${tokens.input_tokens}, output=${tokens.output_tokens}, total=${tokens.input_tokens + tokens.output_tokens}`);
 
 			return parseNarratorResponse(responseText);
-		} catch (error) {
+		}
+		catch (error) {
 			logger.error('LLM narrator error:', error);
 			return {
 				success: true,
@@ -98,10 +99,11 @@ export class LLMNarrator {
 		// Scene or room context (~150 tokens)
 		if (scene) {
 			prompt += `Situation: ${scene.context}\n\n`;
-		} else {
+		}
+		else {
 			prompt += `Location: ${currentRoom.name}\n`;
 			prompt += `${currentRoom.description}\n`;
-			const exits = Object.entries(currentRoom.exits).map(([dir, roomId]) => `${dir}`).join(', ');
+			const exits = Object.entries(currentRoom.exits).map(([dir, _roomId]) => `${dir}`).join(', ');
 			prompt += `Exits: ${exits}\n`;
 			if (currentRoom.npcs.length > 0) {
 				prompt += `NPCs here: ${currentRoom.npcs.map(n => `${n.name} (${n.type}${n.health !== undefined ? `, ${n.health}/${n.maxHealth} HP` : ''})`).join(', ')}\n`;
@@ -154,7 +156,8 @@ Summary (3 sentences):`;
 			const text = message.content[0].type === 'text' ? message.content[0].text : '';
 			logger.info(`narrative compression tokens: input=${message.usage.input_tokens}, output=${message.usage.output_tokens}`);
 			return text;
-		} catch (error) {
+		}
+		catch (error) {
 			logger.error('Narrative compression error:', error);
 			return actions.slice(-3).map(a => a.result.substring(0, 50)).join('. ');
 		}

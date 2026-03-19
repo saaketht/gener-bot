@@ -14,7 +14,8 @@ export class GameStorage {
 	private ensureStorageDir(): void {
 		try {
 			fs.mkdirSync(this.storageDir, { recursive: true });
-		} catch (error) {
+		}
+		catch (error) {
 			logger.error('Failed to create storage directory:', error);
 		}
 	}
@@ -23,7 +24,8 @@ export class GameStorage {
 		const filepath = path.join(this.storageDir, `${state.threadId}.json`);
 		try {
 			fs.writeFileSync(filepath, JSON.stringify(state, null, 2));
-		} catch (error) {
+		}
+		catch (error) {
 			logger.error('Failed to save game:', error);
 			throw error;
 		}
@@ -34,11 +36,17 @@ export class GameStorage {
 		try {
 			const data = fs.readFileSync(filepath, 'utf-8');
 			return JSON.parse(data) as GameState;
-		} catch (error: any) {
+		}
+		catch (error: any) {
 			if (error.code === 'ENOENT') return null;
 			if (error instanceof SyntaxError) {
 				logger.warn(`Corrupted save file, deleting: ${filepath}`);
-				try { fs.unlinkSync(filepath); } catch { /* ignore */ }
+				try {
+					fs.unlinkSync(filepath);
+				}
+				catch (err) {
+					logger.debug(`Failed to delete corrupted save: ${filepath}`, err);
+				}
 				return null;
 			}
 			logger.error('Failed to load game:', error);
@@ -50,7 +58,8 @@ export class GameStorage {
 		const filepath = path.join(this.storageDir, `${threadId}.json`);
 		try {
 			fs.unlinkSync(filepath);
-		} catch (error: any) {
+		}
+		catch (error: any) {
 			if (error.code !== 'ENOENT') {
 				logger.error('Failed to delete game:', error);
 			}
@@ -62,7 +71,8 @@ export class GameStorage {
 			return fs.readdirSync(this.storageDir)
 				.filter(f => f.endsWith('.json'))
 				.map(f => f.replace('.json', ''));
-		} catch {
+		}
+		catch {
 			return [];
 		}
 	}

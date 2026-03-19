@@ -27,7 +27,8 @@ export class DeterministicSystems {
 		if (cmd === 'stats' || cmd === 'status') return this.showStats(player);
 		if (cmd === 'help' || cmd === 'h' || cmd === '?') return this.showHelp();
 
-		return null; // not a deterministic command — fall through to LLM
+		// Not a deterministic command — fall through to LLM
+		return null;
 	}
 
 	// --- Movement ---
@@ -175,7 +176,7 @@ export class DeterministicSystems {
 			const itemName = getMatch[1].trim();
 			const room = this.state.worldMap[this.state.currentRoomId];
 			const itemIndex = room.items.findIndex(i =>
-				i.name.toLowerCase().includes(itemName.toLowerCase())
+				i.name.toLowerCase().includes(itemName.toLowerCase()),
 			);
 
 			if (itemIndex === -1) {
@@ -196,7 +197,7 @@ export class DeterministicSystems {
 		if (dropMatch) {
 			const itemName = dropMatch[1].trim();
 			const itemIndex = player.inventory.findIndex(i =>
-				i.name.toLowerCase().includes(itemName.toLowerCase())
+				i.name.toLowerCase().includes(itemName.toLowerCase()),
 			);
 
 			if (itemIndex === -1) {
@@ -234,7 +235,7 @@ export class DeterministicSystems {
 
 		const itemName = match[1].trim();
 		const itemIndex = player.inventory.findIndex(i =>
-			i.name.toLowerCase().includes(itemName.toLowerCase())
+			i.name.toLowerCase().includes(itemName.toLowerCase()),
 		);
 
 		if (itemIndex === -1) {
@@ -275,7 +276,7 @@ export class DeterministicSystems {
 
 		const itemName = match[1].trim();
 		const item = player.inventory.find(i =>
-			i.name.toLowerCase().includes(itemName.toLowerCase())
+			i.name.toLowerCase().includes(itemName.toLowerCase()),
 		);
 
 		if (!item) {

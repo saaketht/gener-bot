@@ -215,8 +215,8 @@ const getFlightTrackingEmbed = (data: FlightData, _user?: User): EmbedBuilder =>
 		.setTitle(`${data.airline.name} ${data.flightNumber}`)
 		.setDescription(`${routeLine}\n${statusLine}\n\n${progressBar}`)
 		.addFields(
-			{ name: `🛫 Departure`, value: depParts.join('\n'), inline: true },
-			{ name: `🛬 Arrival`, value: arrParts.join('\n'), inline: true },
+			{ name: '🛫 Departure', value: depParts.join('\n'), inline: true },
+			{ name: '🛬 Arrival', value: arrParts.join('\n'), inline: true },
 		)
 		.setFooter({ text: metaParts.length ? `${metaParts.join('  ·  ')}  ·  Last updated` : 'Last updated' })
 		.setTimestamp();

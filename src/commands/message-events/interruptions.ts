@@ -50,7 +50,8 @@ const messageEvent: MessageEvent = {
 				}
 
 				message.reply({ embeds: [embed] });
-			} catch (error) {
+			}
+			catch (error) {
 				logger.error('unsplash api error:', error);
 			}
 		}
@@ -65,7 +66,8 @@ const messageEvent: MessageEvent = {
 				const res: any = await fetch('https://dog.ceo/api/breeds/image/random').then(response => response.json());
 				logger.debug(`dog api status: ${res.status}`);
 				message.reply(res.message);
-			} catch (error) {
+			}
+			catch (error) {
 				logger.error('dog api error:', error);
 			}
 		}
@@ -73,7 +75,8 @@ const messageEvent: MessageEvent = {
 			try {
 				const res: any = await fetch('https://cataas.com/cat?json=true').then(response => response.json());
 				message.reply(res.url);
-			} catch (error) {
+			}
+			catch (error) {
 				logger.error('cat api error:', error);
 			}
 		}

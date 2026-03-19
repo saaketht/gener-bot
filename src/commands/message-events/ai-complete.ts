@@ -4,7 +4,6 @@ import { MessageEvent } from '../../types';
 import { rateLimiter } from '../../utils/rateLimiter';
 import logger from '../../utils/logger';
 import { getAiResponseEmbed, getAiErrorEmbed } from '../../embeds/embeds';
-import { log } from 'console';
 
 const anthropic = new Anthropic({
 	apiKey: process.env.ANTHROPIC_API_KEY,
@@ -54,8 +53,8 @@ const messageEvent: MessageEvent = {
 				model: MODEL,
 				max_tokens: MAX_TOKENS,
 				thinking: {
-					type: "enabled",
-					budget_tokens: 1024
+					type: 'enabled',
+					budget_tokens: 1024,
 				},
 				system: SYSTEM_PROMPT,
 				messages: [
@@ -64,9 +63,9 @@ const messageEvent: MessageEvent = {
 			});
 
 			const thinkingBlocks = response.content
-			.filter(block => block.type === 'thinking')
-			.map(block => (block as any).thinking)
-			.join('\n');
+				.filter(block => block.type === 'thinking')
+				.map(block => (block as any).thinking)
+				.join('\n');
 
 			const completion = response.content
 				.filter(block => block.type === 'text')
@@ -82,7 +81,7 @@ const messageEvent: MessageEvent = {
 			const tokens = response.usage;
 			logger.info(`tokens used { input: ${tokens.input_tokens}, output: ${tokens.output_tokens} }, total: ${tokens.input_tokens + tokens.output_tokens}`);
 
-			const embed = getAiResponseEmbed(message.author, {
+			const _embed = getAiResponseEmbed(message.author, {
 				model: MODEL,
 				prompt: prompt,
 				response: completion,
@@ -91,18 +90,19 @@ const messageEvent: MessageEvent = {
 				success: true,
 			});
 
-			//await message.reply({ embeds: [embed] }); // looks kinda lame tbh
+			// await message.reply({ embeds: [embed] }); // looks kinda lame tbh
 			// Send thinking first, italicized
 			if (thinkingBlocks) {
 				const thinkingLines = thinkingBlocks.split('\n').filter(line => line.trim() !== '');
 				await message.channel.send('*thinking*');
 				for (const line of thinkingLines) {
-					const chunks = chunkText(`*${line}*`);
-					for (const chunk of chunks) {
-						//await message.channel.sendTyping();
-						//await message.channel.send(chunk);
-						//await new Promise(r => setTimeout(r, 800));
-					}
+					const _chunks = chunkText(`*${line}*`);
+				// TODO: send thinking chunks with delay
+				// for (const chunk of _chunks) {
+				// 	await message.channel.sendTyping();
+				// 	await message.channel.send(chunk);
+				// 	await new Promise(r => setTimeout(r, 800));
+				// }
 				}
 			}
 

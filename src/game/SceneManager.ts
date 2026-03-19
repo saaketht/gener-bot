@@ -89,7 +89,8 @@ export class SceneManager {
 		if (hasEnemies && room.flags.includes('DANGEROUS')) {
 			const enemyIds = room.npcs.filter(n => n.type === 'enemy').map(n => n.id);
 			this.startCombatScene(enemyIds);
-		} else {
+		}
+		else {
 			this.endScene();
 		}
 	}

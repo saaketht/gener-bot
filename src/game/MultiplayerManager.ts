@@ -112,7 +112,8 @@ export class MultiplayerManager {
 		}
 
 		if (mode === 'collaborative') {
-			state.party.actionCooldown = 3000; // 3 second cooldown
+			// 3 second cooldown
+			state.party.actionCooldown = 3000;
 		}
 	}
 
