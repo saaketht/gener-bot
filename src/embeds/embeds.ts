@@ -20,3 +20,9 @@ export {
 	getUserEmbed,
 	getAvatarEmbed,
 } from './utility-embeds';
+
+export {
+	getStockQuoteEmbed,
+	getCryptoEmbed,
+	getCommodityEmbed,
+} from './asset-embeds';

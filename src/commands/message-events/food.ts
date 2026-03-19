@@ -1,16 +1,15 @@
-// import fetch from 'node-fetch';
-import axios from 'axios';
-import dotenv from 'dotenv';
-dotenv.config();
-import { Message } from 'discord.js';
-import { randomIntFromInterval } from '../../utils/helpers';
+import { MessageEvent } from '../../types';
+import logger from '../../utils/logger';
+import { searchImage } from '../../utils/imageSearch';
 
 const foodCategories = ['biryani', 'burger', 'butter-chicken', 'dessert', 'dosa', 'idly', 'pasta', 'pizza', 'rice', 'samosa'];
-module.exports = {
+
+const messageEvent: MessageEvent = {
 	name: 'food',
-	async execute(message: Message) {
+	async execute(message) {
 		if (message.author.bot) return;
 		const command = message.content.split(' ').join('').toLowerCase();
+
 		let foodType = '';
 		foodCategories.forEach(i => {
 			if (command.includes(i)) {
@@ -20,42 +19,22 @@ module.exports = {
 				foodType = 'butter chicken';
 			}
 		});
-		if (foodType != '') {
-			const imgNum = randomIntFromInterval(0, 50);
-			console.log(command.split(' '));
-			const options: any = {
-				method: 'GET',
-				url: 'https://api.bing.microsoft.com/v7.0/images/search',
-				params: {
-					q: foodType,
-					count: '1',
-					offset: imgNum,
-					sort: 'relevance',
-				},
-				headers: {
-					'Ocp-Apim-Subscription-Key': process.env.SEARCH_API_KEY,
-				},
-			};
-			await axios.request(options)
-				.then(function(response: { status: number; data: { value: any[]; }; }) {
-					console.log('response: ');
-					// console.log(response.data.value);
-					if (response.status != 200) {
-						console.log('bad response: ');
-						console.log(response.status);
-						return;
-					}
-					else {
-						const url = response.data.value[0].contentUrl;
-						console.log('Link: ' + url + ', image #: ' + imgNum);
-						console.log('image link sent!');
-						message.reply(url);
-					}
-				}).catch(function(error: any) {
-					console.error(error);
-				});
+
+		if (!foodType) return;
+
+		try {
+			const url = await searchImage(foodType);
+			if (!url) {
+				await message.reply('No results found.');
+				return;
+			}
+			await message.reply(url);
+		} catch (error) {
+			logger.error('food image search error:', error);
+			await message.reply('Something went wrong with the image search.');
 		}
 	},
 };
 
+export default messageEvent;
 export { foodCategories };

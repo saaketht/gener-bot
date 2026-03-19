@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import { MessageEvent } from '../../types';
 import logger from '../../utils/logger';
 

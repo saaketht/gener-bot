@@ -1,5 +1,6 @@
 import { MessageEvent } from '../../types';
 import logger from '../../utils/logger';
+import { getStockQuoteEmbed, getCryptoEmbed, getCommodityEmbed } from '../../embeds/asset-embeds';
 
 const cryptos = new Map([
 	['bitcoin', 'BTC'],
@@ -17,12 +18,16 @@ const cryptos = new Map([
 const stocks = new Map([
 	['spy', 'SPY'],
 	['qqq', 'QQQ'],
+	['gold', 'GLD'],
+	['silver', 'SLV'],
 ]);
 
+// Alpha Vantage commodity function names (not ticker symbols)
 const commodities = new Map([
 	['oil', 'WTI'],
 	['crude', 'WTI'],
-	['gold', 'XAU'],
+	['brent', 'BRENT'],
+	['gas', 'NATURAL_GAS'],
 ]);
 
 const RAPIDAPI_HOST = 'alpha-vantage.p.rapidapi.com';
@@ -42,7 +47,7 @@ async function fetchJSON(params: Record<string, string>) {
 }
 
 const messageEvent: MessageEvent = {
-	name: 'assets',
+	name: 'commodities',
 	async execute(message) {
 		if (message.author.bot) return;
 		const words = message.content.toLowerCase().split(/\s+/);
@@ -64,10 +69,7 @@ const messageEvent: MessageEvent = {
 					to_currency: 'USD',
 				});
 				const rate = data['Realtime Currency Exchange Rate'];
-				const price = parseFloat(rate['5. Exchange Rate']);
-				const formatted = price > 1 ? price.toFixed(2) : price.toFixed(3);
-				const name = rate['2. From_Currency Name'] ?? symbol;
-				await message.reply(`${name} (${symbol}): $${formatted}`);
+				await message.reply({ embeds: [getCryptoEmbed(rate)] });
 			} catch (error) {
 				logger.error('crypto error:', error);
 			}
@@ -85,31 +87,28 @@ const messageEvent: MessageEvent = {
 					symbol,
 				});
 				const quote = data['Global Quote'];
-				const price = parseFloat(quote['05. price']).toFixed(2);
-				const change = parseFloat(quote['09. change percent']).toFixed(2);
-				const sign = change.startsWith('-') ? '' : '+';
-				await message.reply(`${symbol}: $${price} (${sign}${change}%)`);
+				await message.reply({ embeds: [getStockQuoteEmbed(quote)] });
 			} catch (error) {
 				logger.error('stock error:', error);
 			}
 			return;
 		}
 
-		// Check commodities (currency exchange rate — XAU works, WTI via same endpoint)
+		// Check commodities (dedicated commodity endpoint — returns daily time series)
 		const commodityWord = words.find(w => commodities.has(w));
 		if (commodityWord) {
-			const symbol = commodities.get(commodityWord)!;
-			logger.debug(`commodity lookup: ${commodityWord} (${symbol})`);
+			const func = commodities.get(commodityWord)!;
+			logger.debug(`commodity lookup: ${commodityWord} (${func})`);
 			try {
 				const data = await fetchJSON({
-					function: 'CURRENCY_EXCHANGE_RATE',
-					from_currency: symbol,
-					to_currency: 'USD',
+					function: func,
+					interval: 'daily',
 				});
-				const rate = data['Realtime Currency Exchange Rate'];
-				const price = parseFloat(rate['5. Exchange Rate']).toFixed(2);
-				const name = rate['2. From_Currency Name'] ?? symbol;
-				await message.reply(`${name} (${symbol}): $${price}`);
+				if (!data.data?.length) {
+					await message.reply(`No recent data for ${commodityWord}.`);
+					return;
+				}
+				await message.reply({ embeds: [getCommodityEmbed(func, data)] });
 			} catch (error) {
 				logger.error('commodity error:', error);
 			}

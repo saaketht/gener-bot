@@ -1,64 +1,39 @@
-// api via rapidapi
-import axios from 'axios';
-import dotenv from 'dotenv';
-dotenv.config();
-module.exports = {
+import { MessageEvent } from '../../types';
+import logger from '../../utils/logger';
+import { searchImage } from '../../utils/imageSearch';
+
+const messageEvent: MessageEvent = {
 	name: 'imagesearch',
-	async execute(message: { author: { bot: any; }; content: string; reply: (arg0: string) => void; }) {
+	async execute(message) {
 		if (message.author.bot) return;
 		const command = message.content.toLowerCase().split(' ');
-		if (command.includes('image-api-info')) {
-			await message.reply('1000 / month: Hard Limit;  three requests per second');
-			return;
+
+		if (command[0] !== 'imagesearch') return;
+
+		let sliceFrom = 1;
+		let imgIndex: number | undefined;
+		if (!isNaN(Number(command[1])) && Number(command[1]) < 200) {
+			imgIndex = Number(command[1]);
+			sliceFrom = 2;
 		}
-		if (command[0] == 'imagesearch') {
-			console.log('operator: ' + command[0] + ' consecutive param?: ' + command[1]);
-			console.log(command);
-			const searchQuery = [];
-			let offset = 1;
-			let imgNum: any = 0;
-			if ((!isNaN(Number(command[1]))) && (Number(command[1]) < 50)) {
-				imgNum = command[1];
-				offset = 2;
+
+		const searchQuery = command.slice(sliceFrom).join(' ');
+		if (!searchQuery) return;
+
+		logger.debug(`imagesearch query: "${searchQuery}", index: ${imgIndex ?? 'random'}`);
+
+		try {
+			const url = await searchImage(searchQuery, imgIndex);
+			if (!url) {
+				await message.reply('No results found.');
+				return;
 			}
-			for (let index = offset; index < command.length; index++) {
-				// console.log(command[index]);
-				searchQuery.push(command[index]);
-			}
-			if (searchQuery.length > 0) {
-				console.log('search query: ' + searchQuery.join('-'));
-				const options: any = {
-					method: 'GET',
-					url: 'https://api.bing.microsoft.com/v7.0/images/search',
-					params: {
-						q: searchQuery.join(' '),
-						count: '1',
-						offset: imgNum,
-						sort: 'relevance',
-					},
-					headers: {
-						'Ocp-Apim-Subscription-Key': process.env.SEARCH_API_KEY,
-					},
-				};
-				await axios.request(options)
-					.then(function(response: { status: number; data: { value: any[]; }; }) {
-						console.log('response: ');
-						// console.log(response.data.value);
-						if (response.status != 200) {
-							console.log('bad response: ');
-							console.log(response.status);
-							return;
-						}
-						else {
-							const url = response.data.value[0].contentUrl;
-							console.log('Link: ' + url + ', image #: ' + imgNum);
-							console.log('image link sent!');
-							message.reply(url);
-						}
-					}).catch(function(error: any) {
-						console.error(error);
-					});
-			}
+			await message.reply(url);
+		} catch (error) {
+			logger.error('imagesearch error:', error);
+			await message.reply('Something went wrong with the image search.');
 		}
 	},
 };
+
+export default messageEvent;
