@@ -15,6 +15,7 @@ const readCommands = async (): Promise<Command[]> => {
 	else {
 		res = glob.sync('**/*.ts', {
 			cwd: `${srcDir}/commands/slash/`,
+			ignore: '**/*.test.ts',
 		});
 	}
 
@@ -39,6 +40,7 @@ const readEvents = async (): Promise<DiscordEvent[]> => {
 	else {
 		res = glob.sync('**/*.ts', {
 			cwd: `${srcDir}/events/`,
+			ignore: '**/*.test.ts',
 		});
 	}
 	for (const file of res) {
@@ -62,6 +64,7 @@ const readMessageEvents = async (): Promise<MessageEvent[]> => {
 	else {
 		res = glob.sync('**/*.ts', {
 			cwd: `${srcDir}/commands/message-events/`,
+			ignore: '**/*.test.ts',
 		});
 	}
 	for (const file of res) {

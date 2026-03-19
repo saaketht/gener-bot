@@ -30,6 +30,6 @@
           }
     },
     "include": ["./**/*.ts", "./**/*.js", "src/commands/message-events/ai-image", "src/commands/message-events/warframe", "src/commands/message-events/warframe", "src/commands/message-events/ai-complete"],
-    "exclude": ["node_modules", "<node_internals>/**", "./built/**/*"]
+    "exclude": ["node_modules", "<node_internals>/**", "./built/**/*", "**/*.test.ts"]
   }
   
