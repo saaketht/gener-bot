@@ -13,6 +13,7 @@ declare global {
             // APIs
             rapidApiKey: string;
             BRAVE_SEARCH_API_KEY: string;
+            UNSPLASH_ACCESS_KEY: string;
             // Database
             DB_NAME: string;
             MONGO_DB_USER: string;

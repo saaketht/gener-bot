@@ -23,6 +23,7 @@ const messageEvent: MessageEvent = {
 		logger.debug(`imagesearch query: "${searchQuery}", index: ${imgIndex ?? 'random'}`);
 
 		try {
+			if ('sendTyping' in message.channel) await message.channel.sendTyping();
 			const url = await searchImage(searchQuery, imgIndex);
 			if (!url) {
 				await message.reply('No results found.');

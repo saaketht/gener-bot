@@ -63,6 +63,7 @@ const messageEvent: MessageEvent = {
 			const symbol = cryptos.get(cryptoWord)!;
 			logger.debug(`crypto lookup: ${cryptoWord} (${symbol})`);
 			try {
+				if ('sendTyping' in message.channel) await message.channel.sendTyping();
 				const data = await fetchJSON({
 					function: 'CURRENCY_EXCHANGE_RATE',
 					from_currency: symbol,
@@ -82,6 +83,7 @@ const messageEvent: MessageEvent = {
 			const symbol = stocks.get(stockWord)!;
 			logger.debug(`stock lookup: ${stockWord} (${symbol})`);
 			try {
+				if ('sendTyping' in message.channel) await message.channel.sendTyping();
 				const data = await fetchJSON({
 					function: 'GLOBAL_QUOTE',
 					symbol,
@@ -100,6 +102,7 @@ const messageEvent: MessageEvent = {
 			const func = commodities.get(commodityWord)!;
 			logger.debug(`commodity lookup: ${commodityWord} (${func})`);
 			try {
+				if ('sendTyping' in message.channel) await message.channel.sendTyping();
 				const data = await fetchJSON({
 					function: func,
 					interval: 'daily',

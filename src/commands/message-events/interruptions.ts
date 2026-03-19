@@ -1,3 +1,4 @@
+import { EmbedBuilder } from 'discord.js';
 import { MessageEvent } from '../../types';
 import logger from '../../utils/logger';
 import { randomIntFromInterval } from '../../utils/helpers';
@@ -21,8 +22,37 @@ const messageEvent: MessageEvent = {
 			message.reply('https://xkcd.com/');
 		}
 		else if (noSpaces.includes('random')) {
-			const res = 'https://source.unsplash.com/random/300x200?sig=' + Math.random();
-			message.reply(res);
+			try {
+				const res: any = await fetch('https://api.unsplash.com/photos/random', {
+					headers: { 'Authorization': `Client-ID ${process.env.UNSPLASH_ACCESS_KEY}` },
+				}).then(r => r.json());
+
+				if (!res.urls) {
+					message.reply('No image found.');
+					return;
+				}
+
+				const location = [res.location?.city, res.location?.country].filter(Boolean).join(', ');
+				const camera = [res.exif?.make, res.exif?.model].filter(Boolean).join(' ');
+
+				const embed = new EmbedBuilder()
+					.setColor(parseInt((res.color ?? '#2C2F33').replace('#', ''), 16))
+					.setImage(res.urls.regular)
+					.setFooter({ text: [
+						res.user?.name ? `📸 ${res.user.name}` : null,
+						location ? `📍 ${location}` : null,
+						camera || null,
+						res.likes ? `❤️ ${res.likes}` : null,
+					].filter(Boolean).join(' • ') || 'Unsplash' });
+
+				if (res.description || res.alt_description) {
+					embed.setTitle(res.description ?? res.alt_description);
+				}
+
+				message.reply({ embeds: [embed] });
+			} catch (error) {
+				logger.error('unsplash api error:', error);
+			}
 		}
 		else if (spaces.includes('indian food')) {
 			message.reply(indianFood.join(', '));
@@ -41,13 +71,13 @@ const messageEvent: MessageEvent = {
 		}
 		else if (noSpaces.includes('cat')) {
 			try {
-				const res: any = await fetch('https://aws.random.cat/meow').then(response => response.json());
-				message.reply(res.file);
+				const res: any = await fetch('https://cataas.com/cat?json=true').then(response => response.json());
+				message.reply(res.url);
 			} catch (error) {
 				logger.error('cat api error:', error);
 			}
 		}
-		else if (noSpaces.includes('diceroll')) {
+		else if (noSpaces.includes('rolldice')) {
 			const res = randomIntFromInterval(1, rolls.length);
 			message.react(rolls[res - 1]);
 		}

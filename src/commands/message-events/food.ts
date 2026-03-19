@@ -23,6 +23,7 @@ const messageEvent: MessageEvent = {
 		if (!foodType) return;
 
 		try {
+			if ('sendTyping' in message.channel) await message.channel.sendTyping();
 			const url = await searchImage(foodType);
 			if (!url) {
 				await message.reply('No results found.');
