@@ -1,24 +1,21 @@
-import axios from 'axios';
 import { FlightData } from '../interfaces/FlightData';
 import logger from './logger';
 
 export async function fetchFlightStatus(flightNumber: string, date: string): Promise<FlightData | null> {
 	try {
-		const response = await axios.get(
-			`https://aerodatabox.p.rapidapi.com/flights/number/${flightNumber}/${date}`,
-			{
-				headers: {
-					'x-rapidapi-key': process.env.rapidApiKey,
-					'x-rapidapi-host': 'aerodatabox.p.rapidapi.com',
-				},
-				params: {
-					withAircraftImage: false,
-					withLocation: false,
-				},
-			},
-		);
+		const url = new URL(`https://aerodatabox.p.rapidapi.com/flights/number/${flightNumber}/${date}`);
+		url.searchParams.set('withAircraftImage', 'false');
+		url.searchParams.set('withLocation', 'false');
 
-		const flights = response.data;
+		const response = await fetch(url.toString(), {
+			headers: {
+				'x-rapidapi-key': process.env.rapidApiKey!,
+				'x-rapidapi-host': 'aerodatabox.p.rapidapi.com',
+			},
+		});
+
+		if (!response.ok) throw new Error(`AeroDataBox returned ${response.status}`);
+		const flights = await response.json();
 		if (!Array.isArray(flights) || flights.length === 0) {
 			return null;
 		}
