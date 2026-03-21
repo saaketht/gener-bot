@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
@@ -35,3 +35,5 @@ jobs:
             npm prune --omit=dev
             rm -rf data/games/*
             sudo systemctl restart gener-bot
+            sleep 3
+            sudo systemctl is-active gener-bot
