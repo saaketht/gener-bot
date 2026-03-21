@@ -130,6 +130,7 @@ describe('convertAnsi', () => {
 		const input = '\x1b[38;5;240;1mcloud\x1b[0m';
 		const result = convertAnsi(input);
 		// Should have the mapped color + bold
+		// eslint-disable-next-line no-control-regex
 		expect(result).toMatch(/\x1b\[\d+;1mcloud/);
 	});
 
