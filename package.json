@@ -7,7 +7,7 @@
     "lint": "eslint --ext .ts .",
     "deploy-commands": "ts-node src/deploy-commands.ts",
     "deploy": "ts-node src/deploy-commands.ts",
-    "build": "tsc",
+    "build": "tsc --skipLibCheck",
     "dev": "nodemon src/index.ts",
     "start": "ts-node src/index.ts",
     "test": "vitest run",
