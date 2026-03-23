@@ -53,7 +53,8 @@ export function normalizeDate(dateStr: string): string {
 	const parts = dateStr.split('/');
 	if (parts.length !== 3) return dateStr;
 	const [m, d, y] = parts;
-	return `${parseInt(m)}/${parseInt(d)}/${y}`;
+	const year = y.length === 2 ? `20${y}` : y;
+	return `${parseInt(m)}/${parseInt(d)}/${year}`;
 }
 
 export function getTodayDateStr(): string {
