@@ -1,7 +1,11 @@
-import { Guild, Interaction } from 'discord.js';
+import { readFile } from 'fs/promises';
+import { homedir } from 'os';
+import { join } from 'path';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, Guild, Interaction } from 'discord.js';
 import { DiscordClient } from '../types';
 import { rateLimiter } from '../utils/rateLimiter';
 import logger from '../utils/logger';
+import { parseTradesCSV, normalizeDate, getPnlEmbed } from '../embeds/pnl-embeds';
 
 const interactionCreateEvent = {
 	name: 'interactionCreate',
@@ -10,6 +14,39 @@ const interactionCreateEvent = {
 
 		// handle button interactions
 		if (interaction.isButton()) {
+			if (interaction.customId.startsWith('pnl_details_')) {
+				const dateStr = interaction.customId.replace('pnl_details_', '');
+				const firstRow = interaction.message.components?.[0];
+				const firstButton = 'components' in firstRow ? (firstRow as any).components?.[0] : null;
+				const isDetailed = firstButton?.label === 'Hide details';
+
+				try {
+					await interaction.deferUpdate();
+					const csvPath = process.env.PNL_CSV_PATH
+						|| join(homedir(), 'rh-trade-exporter', 'outputs', 'spy_trades.csv');
+					const csv = await readFile(csvPath, 'utf-8');
+					const allTrades = parseTradesCSV(csv);
+					const dayTrades = allTrades.filter(t => normalizeDate(t.date) === dateStr);
+
+					const toggledDetail = !isDetailed;
+					const button = new ActionRowBuilder<ButtonBuilder>().addComponents(
+						new ButtonBuilder()
+							.setCustomId(`pnl_details_${dateStr}`)
+							.setLabel(toggledDetail ? 'Hide details' : 'Show details')
+							.setStyle(ButtonStyle.Secondary),
+					);
+
+					await interaction.editReply({
+						embeds: [getPnlEmbed(dayTrades, dateStr, toggledDetail)],
+						components: [button],
+					});
+				}
+				catch (error) {
+					logger.error('Error handling pnl detail toggle', { error });
+				}
+				return;
+			}
+
 			if (interaction.customId.startsWith('flight_refresh_')) {
 				const dbRowId = parseInt(interaction.customId.split('_')[2]);
 				if (isNaN(dbRowId)) return;

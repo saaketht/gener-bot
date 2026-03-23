@@ -22,6 +22,7 @@ declare global {
             NODE_ENV: string;
             PORT: string;
             LOG_LEVEL: string;
+            PNL_CSV_PATH: string;
         }
     }
 }
