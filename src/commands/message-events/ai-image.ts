@@ -3,7 +3,7 @@ import { Message } from 'discord.js';
 import { MessageEvent } from '../../types';
 import { rateLimiter } from '../../utils/rateLimiter';
 import logger from '../../utils/logger';
-import { getAiImageEmbed, getAiErrorEmbed } from '../../embeds/embeds';
+
 
 const grok = new OpenAI({
 	apiKey: process.env.GROK_API_KEY!,
@@ -38,29 +38,23 @@ const messageEvent: MessageEvent = {
 			await message.channel.sendTyping();
 
 			const response = await grok.images.generate({
-				model: 'grok-2-image',
+				model: 'grok-imagine-image',
 				prompt: prompt,
 				n: 1,
 			});
 
 			const imageUrl = response.data?.[0]?.url;
 			if (imageUrl) {
-				const embed = getAiImageEmbed(message.author, prompt, imageUrl);
-				await message.reply({ embeds: [embed] });
+				await message.reply(imageUrl);
 				logger.info('Image generated successfully');
 			}
 			else {
-				const errorEmbed = getAiErrorEmbed(message.author, 'Failed to generate image.');
-				await message.reply({ embeds: [errorEmbed] });
+				await message.reply('Failed to generate image.');
 			}
 		}
 		catch (error) {
 			logger.error('Grok image API error:', error);
-			const errorEmbed = getAiErrorEmbed(
-				message.author,
-				'Sorry, something went wrong generating the image. Try again later.',
-			);
-			await message.reply({ embeds: [errorEmbed] });
+			await message.reply('Sorry, something went wrong generating the image. Try again later.');
 		}
 	},
 };

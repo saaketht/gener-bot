@@ -7,7 +7,7 @@
 
 A Discord bot exploring **event-driven architecture**, **third-party API integration**, and **real-time AI** — built with TypeScript and discord.js v14.
 
-Integrates Claude for AI chat and a text adventure game engine, DALL-E 3 for image generation, real-time flight tracking, live market data, and a persistent SQLite-backed economy system.
+Integrates Claude for AI chat and a text adventure game engine, Grok for image generation, real-time flight tracking, live market data, and a persistent SQLite-backed economy system.
 
 ## Tech Stack
 
@@ -15,7 +15,7 @@ Integrates Claude for AI chat and a text adventure game engine, DALL-E 3 for ima
 - **discord.js v14** — slash commands, message events, gateway events
 - **Claude Haiku 4.5** (Anthropic SDK) — AI chat with extended thinking
 - **Claude Sonnet** (Anthropic SDK) — text adventure game narration
-- **DALL-E 3** (OpenAI SDK) — AI image generation
+- **Grok** (xAI API) — AI image generation
 - **Sequelize** + SQLite — persistent user economy (balance, shop, inventory) and flight tracking
 - **AeroDataBox** (RapidAPI) — real-time flight status with adaptive polling
 - **Alpha Vantage** (RapidAPI) — crypto, stock, and commodity prices
@@ -34,7 +34,7 @@ Integrates Claude for AI chat and a text adventure game engine, DALL-E 3 for ima
 
 **Message Handlers** — Natural language triggers processed through a plugin-style event pipeline. Each handler implements the `MessageEvent` interface and is loaded dynamically — the bot listens to the message stream and each handler independently decides whether to act.
 - `ai <prompt>` — Claude Haiku 4.5 with extended thinking, env-configurable personality, per-user rate limiting
-- `ai-image <prompt>` — DALL-E 3 image generation with Discord embeds
+- `ai-image <prompt>` — Grok image generation
 - `bitcoin`, `ethereum`, `solana`, ... — Live crypto prices via Alpha Vantage
 - `spy`, `qqq` — Stock quotes with price and % change
 - `oil`, `gold` — Commodity prices

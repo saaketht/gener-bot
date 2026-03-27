@@ -8,7 +8,9 @@ const redactSensitiveInfo = format((info) => {
 	});
 	if (info.message && typeof info.message === 'string') {
 		// Redact potential API keys or tokens from the message
-		info.message = info.message.replace(/([A-Za-z0-9-_]{30,})/g, '[REDACTED]');
+		// Redact Bearer tokens and common API key patterns (xai-, sk-, etc.)
+		info.message = info.message.replace(/Bearer\s+\S+/g, 'Bearer [REDACTED]')
+			.replace(/\b(xai-|sk-|key-)[A-Za-z0-9-_]{20,}\b/g, '[REDACTED]');
 	}
 	return info;
 });

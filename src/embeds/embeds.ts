@@ -8,7 +8,6 @@ export {
 
 export {
 	getAiResponseEmbed,
-	getAiImageEmbed,
 	getAiErrorEmbed,
 } from './ai-embeds';
 

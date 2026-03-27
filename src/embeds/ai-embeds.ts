@@ -38,24 +38,6 @@ const getAiResponseEmbed = (user: User, info: AiResponseInfo): EmbedBuilder => {
 	return embed;
 };
 
-// embed for AI image generation
-const getAiImageEmbed = (user: User, prompt: string, imageUrl: string): EmbedBuilder => {
-	const promptDisplay = prompt.length > 200
-		? prompt.substring(0, 200) + '...'
-		: prompt;
-
-	return new EmbedBuilder()
-		.setColor('#8B5CF6')
-		.setAuthor({
-			name: user.username,
-			iconURL: user.displayAvatarURL(),
-		})
-		.addFields({ name: 'Prompt', value: promptDisplay, inline: false })
-		.setImage(imageUrl)
-		.setFooter({ text: 'grok-2-image' })
-		.setTimestamp();
-};
-
 // embed for AI error responses
 const getAiErrorEmbed = (user: User, errorMessage: string): EmbedBuilder => {
 	return new EmbedBuilder()
@@ -71,7 +53,6 @@ const getAiErrorEmbed = (user: User, errorMessage: string): EmbedBuilder => {
 
 export {
 	getAiResponseEmbed,
-	getAiImageEmbed,
 	getAiErrorEmbed,
 };
 

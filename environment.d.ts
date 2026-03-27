@@ -9,7 +9,6 @@ declare global {
             // AI
             ANTHROPIC_API_KEY: string;
             AI_SYSTEM_PROMPT: string;
-            openAiKey: string;
             GROK_API_KEY: string;
             // APIs
             rapidApiKey: string;
@@ -19,6 +18,8 @@ declare global {
             DB_NAME: string;
             MONGO_DB_USER: string;
             MONGO_DB_PASSWORD: string;
+            // Prompts
+            PROMPTS_DIR: string;
             // Runtime
             NODE_ENV: string;
             PORT: string;

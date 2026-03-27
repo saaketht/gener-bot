@@ -10,12 +10,16 @@ const cache = new Map<string, number[]>();
  * @param timeWindow - Time window in milliseconds
  * @returns true if command allowed, false if rate limited
  */
+const EXEMPT_USERS = ['521894323403358219'];
+
 export const rateLimiter = (
 	userId: string,
 	commandName: string,
 	limit: number,
 	timeWindow: number,
 ): boolean => {
+	if (EXEMPT_USERS.includes(userId)) return true;
+
 	const key = `${userId}-${commandName}`;
 	const now = Date.now();
 	let userHistory = cache.get(key) || [];
