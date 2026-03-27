@@ -5,8 +5,9 @@ import { rateLimiter } from '../../utils/rateLimiter';
 import logger from '../../utils/logger';
 import { getAiImageEmbed, getAiErrorEmbed } from '../../embeds/embeds';
 
-const openai = new OpenAI({
-	apiKey: process.env.openAiKey,
+const grok = new OpenAI({
+	apiKey: process.env.GROK_API_KEY!,
+	baseURL: 'https://api.x.ai/v1',
 });
 
 const messageEvent: MessageEvent = {
@@ -36,11 +37,10 @@ const messageEvent: MessageEvent = {
 			// Show typing indicator
 			await message.channel.sendTyping();
 
-			const response = await openai.images.generate({
-				model: 'dall-e-3',
+			const response = await grok.images.generate({
+				model: 'grok-2-image',
 				prompt: prompt,
 				n: 1,
-				size: '1024x1024',
 			});
 
 			const imageUrl = response.data?.[0]?.url;
@@ -55,7 +55,7 @@ const messageEvent: MessageEvent = {
 			}
 		}
 		catch (error) {
-			logger.error('DALL-E API error:', error);
+			logger.error('Grok image API error:', error);
 			const errorEmbed = getAiErrorEmbed(
 				message.author,
 				'Sorry, something went wrong generating the image. Try again later.',

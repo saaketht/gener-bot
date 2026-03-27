@@ -52,7 +52,7 @@ const getAiImageEmbed = (user: User, prompt: string, imageUrl: string): EmbedBui
 		})
 		.addFields({ name: 'Prompt', value: promptDisplay, inline: false })
 		.setImage(imageUrl)
-		.setFooter({ text: 'DALL-E 3' })
+		.setFooter({ text: 'grok-2-image' })
 		.setTimestamp();
 };
 

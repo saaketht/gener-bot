@@ -1,15 +1,16 @@
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { Message } from 'discord.js';
 import { MessageEvent } from '../../types';
 import { rateLimiter } from '../../utils/rateLimiter';
 import logger from '../../utils/logger';
 import { getAiResponseEmbed, getAiErrorEmbed } from '../../embeds/embeds';
 
-const anthropic = new Anthropic({
-	apiKey: process.env.ANTHROPIC_API_KEY,
+const grok = new OpenAI({
+	apiKey: process.env.GROK_API_KEY!,
+	baseURL: 'https://api.x.ai/v1',
 });
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'grok-3-mini';
 const MAX_TOKENS = 2048;
 const DEFAULT_PROMPT = 'You are generbot, a concise and direct AI assistant.';
 const SYSTEM_PROMPT = process.env.AI_SYSTEM_PROMPT || DEFAULT_PROMPT;
@@ -49,60 +50,41 @@ const messageEvent: MessageEvent = {
 			// Show typing indicator
 			await message.channel.sendTyping();
 
-			const response = await anthropic.messages.create({
+			const response = await grok.chat.completions.create({
 				model: MODEL,
 				max_tokens: MAX_TOKENS,
-				thinking: {
-					type: 'enabled',
-					budget_tokens: 1024,
-				},
-				system: SYSTEM_PROMPT,
 				messages: [
+					{ role: 'system', content: SYSTEM_PROMPT },
 					{ role: 'user', content: prompt },
 				],
 			});
 
-			const thinkingBlocks = response.content
-				.filter(block => block.type === 'thinking')
-				.map(block => (block as any).thinking)
-				.join('\n');
-
-			const completion = response.content
-				.filter(block => block.type === 'text')
-				.map(block => (block as any).text)
-				.join('\n');
+			const completion = response.choices[0]?.message?.content ?? '';
+			const reasoning = (response.choices[0]?.message as any)?.reasoning ?? '';
 
 			if (!completion) {
 				await message.reply('Unable to generate response.');
 				return;
 			}
 
-
 			const tokens = response.usage;
-			logger.info(`tokens used { input: ${tokens.input_tokens}, output: ${tokens.output_tokens} }, total: ${tokens.input_tokens + tokens.output_tokens}`);
+			logger.info(`tokens used { input: ${tokens?.prompt_tokens}, output: ${tokens?.completion_tokens} }, total: ${(tokens?.prompt_tokens ?? 0) + (tokens?.completion_tokens ?? 0)}`);
 
 			const _embed = getAiResponseEmbed(message.author, {
 				model: MODEL,
 				prompt: prompt,
 				response: completion,
-				inputTokens: tokens.input_tokens,
-				outputTokens: tokens.output_tokens,
+				inputTokens: tokens?.prompt_tokens ?? 0,
+				outputTokens: tokens?.completion_tokens ?? 0,
 				success: true,
 			});
 
-			// await message.reply({ embeds: [embed] }); // looks kinda lame tbh
-			// Send thinking first, italicized
-			if (thinkingBlocks) {
-				const thinkingLines = thinkingBlocks.split('\n').filter(line => line.trim() !== '');
+			// Send reasoning first, italicized
+			if (reasoning) {
+				const thinkingLines = reasoning.split('\n').filter((line: string) => line.trim() !== '');
 				await message.channel.send('*thinking*');
-				for (const line of thinkingLines) {
-					const _chunks = chunkText(`*${line}*`);
-				// TODO: send thinking chunks with delay
-				// for (const chunk of _chunks) {
-				// 	await message.channel.sendTyping();
-				// 	await message.channel.send(chunk);
-				// 	await new Promise(r => setTimeout(r, 800));
-				// }
+				for (const _line of thinkingLines) {
+					// TODO: send thinking chunks with delay
 				}
 			}
 
@@ -118,7 +100,7 @@ const messageEvent: MessageEvent = {
 			}
 		}
 		catch (error) {
-			logger.error('Claude API error:', error);
+			logger.error('Grok API error:', error);
 			const errorEmbed = getAiErrorEmbed(
 				message.author,
 				'Sorry, something went wrong with the AI. Try again later.',

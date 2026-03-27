@@ -10,6 +10,7 @@ declare global {
             ANTHROPIC_API_KEY: string;
             AI_SYSTEM_PROMPT: string;
             openAiKey: string;
+            GROK_API_KEY: string;
             // APIs
             rapidApiKey: string;
             BRAVE_SEARCH_API_KEY: string;
