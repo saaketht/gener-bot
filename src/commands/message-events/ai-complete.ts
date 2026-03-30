@@ -13,7 +13,7 @@ const grok = new OpenAI({
 });
 
 const MODEL = 'grok-4.20-0309-non-reasoning';
-const MAX_TOKENS = 2048;
+const MAX_TOKENS = 512;
 const MAX_HISTORY = 20;
 const DEFAULT_PROMPT = 'You are generbot, a concise and direct AI assistant.';
 
@@ -36,6 +36,24 @@ function chunkText(text: string, maxLen = 2000): string[] {
 		chunks.push(text.substring(i, i + maxLen));
 	}
 	return chunks;
+}
+
+// Maps any bot message ID to the full completion text it was part of
+const responseCache = new Map<string, string>();
+const CACHE_MAX = 50;
+
+function cacheResponse(messageIds: string[], fullText: string) {
+	for (const id of messageIds) {
+		responseCache.set(id, fullText);
+	}
+	// Evict oldest entries if cache grows too large
+	if (responseCache.size > CACHE_MAX) {
+		const excess = responseCache.size - CACHE_MAX;
+		const keys = responseCache.keys();
+		for (let i = 0; i < excess; i++) {
+			responseCache.delete(keys.next().value!);
+		}
+	}
 }
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/jpg'];
@@ -81,7 +99,8 @@ async function walkReplyChain(message: Message, botId: string): Promise<Array<{ 
 		let content: any;
 
 		if (isBotMsg) {
-			content = current.content;
+			// Use cached full response if available, otherwise just this message
+			content = responseCache.get(current.id) ?? current.content;
 		}
 		else {
 			// Strip "ai " prefix if present
@@ -223,16 +242,19 @@ const messageEvent: MessageEvent = {
 				}
 			}
 
-			// Send actual response
+			// Send actual response and cache message IDs
+			const sentIds: string[] = [];
 			const lines = completion.split('\n').filter(line => line.trim() !== '');
 			for (const line of lines) {
 				const chunks = chunkText(line);
 				for (const chunk of chunks) {
 					await message.channel.sendTyping();
-					await message.channel.send(chunk);
+					const sent = await message.channel.send(chunk);
+					sentIds.push(sent.id);
 					await new Promise(r => setTimeout(r, 800));
 				}
 			}
+			cacheResponse(sentIds, completion);
 		}
 		catch (error) {
 			logger.error('Grok API error:', error);
