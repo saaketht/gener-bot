@@ -228,7 +228,7 @@ const getFlightTrackingEmbed = (data: FlightData, _user?: User): EmbedBuilder =>
 const getFlightListEmbed = (flights: any[], user: User): EmbedBuilder => {
 	const lines = flights.map((f: any) => {
 		const emoji = STATUS_EMOJI[f.status] ?? '✈️';
-		return `${emoji} **#${f.id}** · \`${f.flight_number}\` · ${f.flight_date} · *${f.status}*`;
+		return `${emoji} \`${f.flight_number}\` · ${f.flight_date} · *${f.status}* · ID \`#${f.id}\``;
 	});
 
 	return new EmbedBuilder()
@@ -239,6 +239,7 @@ const getFlightListEmbed = (flights: any[], user: User): EmbedBuilder => {
 		})
 		.setTitle('✈️ Tracked Flights')
 		.setDescription(lines.join('\n') || 'No flights tracked.')
+		.setFooter({ text: 'Remove with /flight remove <flight number> or #ID' })
 		.setTimestamp();
 };
 

@@ -32,8 +32,8 @@ const flightCommand: Command = {
 			sub.setName('remove')
 				.setDescription('Stop tracking a flight')
 				.addStringOption(opt =>
-					opt.setName('flight_number')
-						.setDescription('Flight number (e.g. AA2633)')
+					opt.setName('flight')
+						.setDescription('Flight number (e.g. AA2633) or tracking ID (e.g. #3)')
 						.setRequired(true)),
 		) as SlashCommandBuilder,
 
@@ -198,15 +198,28 @@ async function handleList(interaction: ChatInputCommandInteraction) {
 }
 
 async function handleRemove(client: DiscordClient, interaction: ChatInputCommandInteraction) {
-	const flightNumber = interaction.options.getString('flight_number', true).toUpperCase().replace(/\s+/g, '');
+	const input = interaction.options.getString('flight', true).trim();
 
-	const row = await TrackedFlights.findOne({
-		where: { flight_number: flightNumber, user_id: interaction.user.id, active: true },
-	}) as any;
+	// check if input is a tracking ID (e.g. "#3" or "3")
+	const idMatch = input.match(/^#?(\d+)$/);
+	let row: any;
+
+	if (idMatch) {
+		const id = parseInt(idMatch[1]);
+		row = await TrackedFlights.findOne({
+			where: { id, user_id: interaction.user.id, active: true },
+		});
+	}
+	else {
+		const flightNumber = input.toUpperCase().replace(/\s+/g, '');
+		row = await TrackedFlights.findOne({
+			where: { flight_number: flightNumber, user_id: interaction.user.id, active: true },
+		});
+	}
 
 	if (!row) {
 		await interaction.reply({
-			content: `You're not tracking **${flightNumber}**. Use \`/flight list\` to see your flights.`,
+			content: `No active tracking found for **${input}**. Use \`/flight list\` to see your flights.`,
 			ephemeral: true,
 		});
 		return;
