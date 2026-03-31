@@ -31,9 +31,9 @@ const flightCommand: Command = {
 		.addSubcommand(sub =>
 			sub.setName('remove')
 				.setDescription('Stop tracking a flight')
-				.addIntegerOption(opt =>
-					opt.setName('id')
-						.setDescription('Tracking ID from /flight list')
+				.addStringOption(opt =>
+					opt.setName('flight_number')
+						.setDescription('Flight number (e.g. AA2633)')
 						.setRequired(true)),
 		) as SlashCommandBuilder,
 
@@ -78,14 +78,16 @@ async function handleTrack(client: DiscordClient, interaction: ChatInputCommandI
 		return;
 	}
 
+	// defer early — DB queries + API calls can exceed Discord's 3s window
+	await interaction.deferReply();
+
 	// check per-user limit
 	const activeCount = await TrackedFlights.count({
 		where: { user_id: interaction.user.id, active: true },
 	});
 	if (activeCount >= MAX_TRACKED_PER_USER) {
-		await interaction.reply({
+		await interaction.editReply({
 			embeds: [getFlightErrorEmbed(`You can track up to ${MAX_TRACKED_PER_USER} flights at a time. Remove one first with \`/flight remove\`.`)],
-			ephemeral: true,
 		});
 		return;
 	}
@@ -101,14 +103,11 @@ async function handleTrack(client: DiscordClient, interaction: ChatInputCommandI
 		},
 	});
 	if (existing) {
-		await interaction.reply({
+		await interaction.editReply({
 			embeds: [getFlightErrorEmbed(`You're already tracking ${flightNumber} on ${date}.`)],
-			ephemeral: true,
 		});
 		return;
 	}
-
-	await interaction.deferReply();
 
 	// fetch initial status to validate flight exists
 	let data = await fetchFlightStatus(flightNumber, date);
@@ -199,15 +198,15 @@ async function handleList(interaction: ChatInputCommandInteraction) {
 }
 
 async function handleRemove(client: DiscordClient, interaction: ChatInputCommandInteraction) {
-	const id = interaction.options.getInteger('id', true);
+	const flightNumber = interaction.options.getString('flight_number', true).toUpperCase().replace(/\s+/g, '');
 
 	const row = await TrackedFlights.findOne({
-		where: { id, user_id: interaction.user.id, active: true },
+		where: { flight_number: flightNumber, user_id: interaction.user.id, active: true },
 	}) as any;
 
 	if (!row) {
 		await interaction.reply({
-			content: 'Tracking ID not found. Use `/flight list` to see your flights.',
+			content: `You're not tracking **${flightNumber}**. Use \`/flight list\` to see your flights.`,
 			ephemeral: true,
 		});
 		return;
@@ -215,7 +214,7 @@ async function handleRemove(client: DiscordClient, interaction: ChatInputCommand
 
 	await row.update({ active: false });
 	if (client.flightTracker) {
-		client.flightTracker.stopTracking(id);
+		client.flightTracker.stopTracking(row.id);
 	}
 
 	await interaction.reply({
