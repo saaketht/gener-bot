@@ -2,8 +2,17 @@ import { FlightData } from '../interfaces/FlightData';
 import logger from './logger';
 
 export async function fetchFlightStatus(flightNumber: string, date: string): Promise<FlightData | null> {
+	// try FlightAware first (more reliable, but limited to ±2 days)
+	const fa = await fetchFlightAware(flightNumber, date);
+	if (fa) return fa;
+
+	// fallback to AeroDataBox for schedule data further out
+	logger.info(`FlightAware returned no results for ${flightNumber} on ${date}, trying AeroDataBox`);
+	return fetchAeroDataBox(flightNumber, date);
+}
+
+async function fetchFlightAware(flightNumber: string, date: string): Promise<FlightData | null> {
 	try {
-		// FlightAware AeroAPI v4: GET /flights/{ident}?start=...&end=...
 		const start = `${date}T00:00:00Z`;
 		const end = `${date}T23:59:59Z`;
 		const url = new URL(`https://aeroapi.flightaware.com/aeroapi/flights/${flightNumber}`);
@@ -23,13 +32,42 @@ export async function fetchFlightStatus(flightNumber: string, date: string): Pro
 			return null;
 		}
 
-		return normalize(flights[0]);
+		return normalizeFlightAware(flights[0]);
 	}
 	catch (error) {
-		logger.error('Failed to fetch flight status', { flightNumber, date, error });
+		logger.error('FlightAware fetch failed', { flightNumber, date, error });
 		return null;
 	}
 }
+
+async function fetchAeroDataBox(flightNumber: string, date: string): Promise<FlightData | null> {
+	try {
+		const url = new URL(`https://aerodatabox.p.rapidapi.com/flights/number/${flightNumber}/${date}`);
+		url.searchParams.set('withAircraftImage', 'false');
+		url.searchParams.set('withLocation', 'false');
+
+		const response = await fetch(url.toString(), {
+			headers: {
+				'x-rapidapi-key': process.env.rapidApiKey!,
+				'x-rapidapi-host': 'aerodatabox.p.rapidapi.com',
+			},
+		});
+
+		if (!response.ok) throw new Error(`AeroDataBox returned ${response.status}`);
+		const flights = await response.json();
+		if (!Array.isArray(flights) || flights.length === 0) {
+			return null;
+		}
+
+		return normalizeAeroDataBox(flights[0]);
+	}
+	catch (error) {
+		logger.error('AeroDataBox fetch failed', { flightNumber, date, error });
+		return null;
+	}
+}
+
+// --- FlightAware normalization ---
 
 function toLocalTime(utcIso: string | null | undefined, timeZone: string | null | undefined): string | undefined {
 	if (!utcIso) return undefined;
@@ -37,7 +75,6 @@ function toLocalTime(utcIso: string | null | undefined, timeZone: string | null 
 	try {
 		const d = new Date(utcIso);
 		if (isNaN(d.getTime())) return undefined;
-		// format as "YYYY-MM-DD HH:mm" in the airport's local timezone
 		const parts = new Intl.DateTimeFormat('en-CA', {
 			timeZone,
 			year: 'numeric',
@@ -55,8 +92,7 @@ function toLocalTime(utcIso: string | null | undefined, timeZone: string | null 
 	}
 }
 
-function normalizeStatus(raw: any): string {
-	// FlightAware status is a sentence like "En Route / On Time", "Landed / Delayed", etc.
+function normalizeFlightAwareStatus(raw: any): string {
 	const status: string = raw.status ?? '';
 	const s = status.toLowerCase();
 
@@ -67,18 +103,15 @@ function normalizeStatus(raw: any): string {
 	if (s.includes('taxiing')) return 'Landed';
 	if (s.includes('scheduled') || s === '') return 'Scheduled';
 
-	// fallback: check actual times
 	if (raw.actual_on || raw.actual_in) return 'Landed';
 	if (raw.actual_off || raw.actual_out) return 'Departed';
 	return 'Scheduled';
 }
 
-function normalize(raw: any): FlightData {
+function normalizeFlightAware(raw: any): FlightData {
 	const depTz = raw.origin?.timezone;
 	const arrTz = raw.destination?.timezone;
 
-	// FlightAware uses out/in (gate) and off/on (runway)
-	// Use gate times (out/in) for display, runway times (off/on) as fallback
 	const schedDepUtc = raw.scheduled_out ?? raw.scheduled_off;
 	const actualDepUtc = raw.actual_out ?? raw.actual_off;
 	const estDepUtc = raw.estimated_out ?? raw.estimated_off;
@@ -92,7 +125,7 @@ function normalize(raw: any): FlightData {
 			iata: raw.operator_iata ?? raw.operator_icao ?? '',
 		},
 		flightNumber: raw.ident_iata ?? raw.ident ?? '',
-		status: normalizeStatus(raw),
+		status: normalizeFlightAwareStatus(raw),
 		departure: {
 			airport: {
 				name: raw.origin?.name ?? 'Unknown',
@@ -124,6 +157,75 @@ function normalize(raw: any): FlightData {
 		aircraft: raw.aircraft_type ? {
 			model: raw.aircraft_type,
 			registration: raw.registration ?? '',
+		} : undefined,
+	};
+}
+
+// --- AeroDataBox normalization ---
+
+function parseAdbTime(obj: any, fallbackLocal?: string): { local?: string; utc?: string } {
+	if (!obj && !fallbackLocal) return {};
+	if (typeof obj === 'string') return { local: obj };
+	return {
+		local: obj?.local ?? fallbackLocal,
+		utc: obj?.utc,
+	};
+}
+
+function normalizeAeroDataBox(raw: any): FlightData {
+	const depSched = parseAdbTime(raw.departure?.scheduledTime, raw.departure?.scheduledTimeLocal);
+	const depActual = parseAdbTime(raw.departure?.actualTime, raw.departure?.actualTimeLocal);
+	const depRevised = parseAdbTime(raw.departure?.revisedTime, raw.departure?.revisedTimeLocal);
+	const arrSched = parseAdbTime(raw.arrival?.scheduledTime, raw.arrival?.scheduledTimeLocal);
+	const arrActual = parseAdbTime(raw.arrival?.actualTime, raw.arrival?.actualTimeLocal);
+	const arrRevised = parseAdbTime(raw.arrival?.revisedTime, raw.arrival?.revisedTimeLocal);
+
+	return {
+		airline: {
+			name: raw.airline?.name ?? 'Unknown',
+			iata: raw.airline?.iata ?? '',
+		},
+		flightNumber: raw.number ?? '',
+		status: raw.status ?? 'Unknown',
+		departure: {
+			airport: {
+				name: raw.departure?.airport?.name ?? 'Unknown',
+				iata: raw.departure?.airport?.iata ?? '',
+				timeZone: raw.departure?.airport?.timeZone,
+			},
+			scheduledTime: depSched.local,
+			actualTime: depActual.local,
+			estimatedTime: depRevised.local,
+			scheduledTimeUtc: depSched.utc,
+			actualTimeUtc: depActual.utc,
+			estimatedTimeUtc: depRevised.utc,
+			terminal: raw.departure?.terminal,
+			gate: raw.departure?.gate,
+			delay: raw.departure?.delay,
+		},
+		arrival: {
+			airport: {
+				name: raw.arrival?.airport?.name ?? 'Unknown',
+				iata: raw.arrival?.airport?.iata ?? '',
+				timeZone: raw.arrival?.airport?.timeZone,
+			},
+			scheduledTime: arrSched.local,
+			actualTime: arrActual.local,
+			estimatedTime: arrRevised.local,
+			scheduledTimeUtc: arrSched.utc,
+			actualTimeUtc: arrActual.utc,
+			estimatedTimeUtc: arrRevised.utc,
+			terminal: raw.arrival?.terminal,
+			gate: raw.arrival?.gate,
+			baggage: raw.arrival?.baggageBelt,
+			delay: raw.arrival?.delay,
+		},
+		aircraft: raw.aircraft ? {
+			model: raw.aircraft.model ?? raw.aircraft.modeS ?? 'Unknown',
+			registration: raw.aircraft.reg ?? '',
+		} : undefined,
+		greatCircleDistance: raw.greatCircleDistance ? {
+			km: raw.greatCircleDistance.km,
 		} : undefined,
 	};
 }
