@@ -12,6 +12,7 @@ declare global {
             GROK_API_KEY: string;
             // APIs
             rapidApiKey: string;
+            FLIGHTAWARE_API_KEY: string;
             BRAVE_SEARCH_API_KEY: string;
             UNSPLASH_ACCESS_KEY: string;
             // Database

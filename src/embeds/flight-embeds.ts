@@ -67,9 +67,10 @@ function extractTimeStr(isoTime?: string, timeZone?: string): string {
 function parseUtcMs(utcTime?: string, localFallback?: string): number {
 	// prefer UTC time for calculations
 	if (utcTime) {
-		// AeroDataBox UTC format: "2026-03-14 00:45Z" or "2026-03-14T00:45Z"
+		// normalize space-separated format and ensure Z suffix for UTC
 		const normalized = utcTime.replace(' ', 'T');
-		const t = new Date(normalized.endsWith('Z') ? normalized : normalized + 'Z').getTime();
+		const withZ = normalized.endsWith('Z') ? normalized : normalized + 'Z';
+		const t = new Date(withZ).getTime();
 		if (!isNaN(t)) return t;
 	}
 	// fallback: try local time (unreliable for math but better than nothing)
