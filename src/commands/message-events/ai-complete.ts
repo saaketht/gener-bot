@@ -18,7 +18,11 @@ const MAX_HISTORY = 20;
 const DEFAULT_PROMPT = 'You are generbot, a concise and direct AI assistant.';
 
 function loadPrompt(filename: string): string {
-	const promptsDir = process.env.PROMPTS_DIR || join(resolve(__dirname, '..', '..', '..'), 'prompts');
+	// ts-node: src/commands/message-events/ → 3 up = root
+	// compiled: built/src/commands/message-events/ → 4 up = root
+	const levels = __dirname.includes('built') ? 4 : 3;
+	const root = resolve(__dirname, ...Array(levels).fill('..'));
+	const promptsDir = process.env.PROMPTS_DIR || join(root, 'prompts');
 	try {
 		return readFileSync(join(promptsDir, filename), 'utf-8').trim();
 	}
