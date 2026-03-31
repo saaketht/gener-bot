@@ -187,10 +187,10 @@ const messageEvent: MessageEvent = {
 			if (last && last.userId === message.author.id && Date.now() - last.timestamp < DELETE_WINDOW_MS) {
 				lastResponse.delete(channelId);
 				const deletions: Promise<unknown>[] = last.sentIds.map(id =>
-					message.channel.messages.delete(id).catch(() => {}),
+					message.channel.messages.delete(id).catch(() => undefined),
 				);
 				// Also delete the "delete" message itself
-				deletions.push(message.delete().catch(() => {}));
+				deletions.push(message.delete().catch(() => undefined));
 				await Promise.all(deletions);
 				logger.info(`Deleted AI response (${last.sentIds.length} msgs) in ${channelId} by ${message.author.username}`);
 			}
