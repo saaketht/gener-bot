@@ -1,4 +1,5 @@
 import { Sequelize } from 'sequelize';
+import { join } from 'path';
 import { currencyShop } from './CurrencyShop';
 import { users } from './Users';
 import { userItems } from './UserItems';
@@ -7,7 +8,7 @@ const sequelize = new Sequelize('database', 'username', 'password', {
 	host: 'localhost',
 	dialect: 'sqlite',
 	logging: false,
-	storage: 'database.sqlite',
+	storage: join(__dirname, '..', '..', 'database.sqlite'),
 });
 
 const CurrencyShop = currencyShop(sequelize);

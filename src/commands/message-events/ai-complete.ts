@@ -42,6 +42,15 @@ function chunkText(text: string, maxLen = 2000): string[] {
 const responseCache = new Map<string, string>();
 const CACHE_MAX = 50;
 
+// Active AI generation state per channel — for cancellation
+const activeGenerations = new Map<string, AbortController>();
+
+// Last AI response per channel — for deletion
+const DELETE_WINDOW_MS = 30_000;
+const lastResponse = new Map<string, { sentIds: string[]; userId: string; timestamp: number }>();
+
+const STOP_KEYWORDS = new Set(['stop', 'shut up', 'stfu']);
+
 function cacheResponse(messageIds: string[], fullText: string) {
 	for (const id of messageIds) {
 		responseCache.set(id, fullText);
@@ -158,7 +167,36 @@ const messageEvent: MessageEvent = {
 		if (message.author.bot) return;
 		if (!message.channel.isSendable()) return;
 
-		const content = message.content.toLowerCase();
+		const content = message.content.toLowerCase().trim();
+		const channelId = message.channelId;
+
+		// "stop" / "shut up" / "stfu" — cancel active AI output
+		if (STOP_KEYWORDS.has(content)) {
+			const controller = activeGenerations.get(channelId);
+			if (controller) {
+				controller.abort();
+				activeGenerations.delete(channelId);
+				logger.info(`AI output cancelled in ${channelId} by ${message.author.username}`);
+			}
+			return;
+		}
+
+		// "delete" — remove the last AI response within the time window
+		if (content === 'delete') {
+			const last = lastResponse.get(channelId);
+			if (last && last.userId === message.author.id && Date.now() - last.timestamp < DELETE_WINDOW_MS) {
+				lastResponse.delete(channelId);
+				const deletions: Promise<unknown>[] = last.sentIds.map(id =>
+					message.channel.messages.delete(id).catch(() => {}),
+				);
+				// Also delete the "delete" message itself
+				deletions.push(message.delete().catch(() => {}));
+				await Promise.all(deletions);
+				logger.info(`Deleted AI response (${last.sentIds.length} msgs) in ${channelId} by ${message.author.username}`);
+			}
+			return;
+		}
+
 		const isAiCommand = content.startsWith('ai ') || content === 'ai';
 		const botId = message.client.user?.id ?? '';
 		const isReply = !isAiCommand && await isReplyToBot(message, botId);
@@ -181,6 +219,9 @@ const messageEvent: MessageEvent = {
 		}
 
 		logger.info(`${message.author.username} ran ai: ${textPrompt.substring(0, 50)}...`);
+
+		const abortController = new AbortController();
+		activeGenerations.set(channelId, abortController);
 
 		try {
 			// Show typing indicator
@@ -211,7 +252,9 @@ const messageEvent: MessageEvent = {
 				model: MODEL,
 				max_tokens: MAX_TOKENS,
 				messages: messages as any,
-			});
+			}, { signal: abortController.signal });
+
+			if (abortController.signal.aborted) return;
 
 			const completion = response.choices[0]?.message?.content ?? '';
 			const reasoning = (response.choices[0]?.message as any)?.reasoning ?? '';
@@ -246,8 +289,10 @@ const messageEvent: MessageEvent = {
 			const sentIds: string[] = [];
 			const lines = completion.split('\n').filter(line => line.trim() !== '');
 			for (const line of lines) {
+				if (abortController.signal.aborted) break;
 				const chunks = chunkText(line);
 				for (const chunk of chunks) {
+					if (abortController.signal.aborted) break;
 					await message.channel.sendTyping();
 					const sent = await message.channel.send(chunk);
 					sentIds.push(sent.id);
@@ -255,14 +300,27 @@ const messageEvent: MessageEvent = {
 				}
 			}
 			cacheResponse(sentIds, completion);
+
+			// Store for "delete" command
+			if (sentIds.length > 0) {
+				lastResponse.set(channelId, {
+					sentIds,
+					userId: message.author.id,
+					timestamp: Date.now(),
+				});
+			}
 		}
 		catch (error) {
+			if (abortController.signal.aborted) return;
 			logger.error('Grok API error:', error);
 			const errorEmbed = getAiErrorEmbed(
 				message.author,
 				'Sorry, something went wrong with the AI. Try again later.',
 			);
 			await message.reply({ embeds: [errorEmbed] });
+		}
+		finally {
+			activeGenerations.delete(channelId);
 		}
 	},
 };

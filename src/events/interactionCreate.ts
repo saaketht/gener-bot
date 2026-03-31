@@ -82,10 +82,17 @@ const interactionCreateEvent = {
 		}
 		catch (error) {
 			console.error(`[${guild.id}]`, error);
-			await interaction.reply({
-				content: 'There was an error while executing this command!',
-				ephemeral: true,
-			});
+			try {
+				if (interaction.deferred || interaction.replied) {
+					await interaction.editReply({ content: 'There was an error while executing this command!' });
+				}
+				else {
+					await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
+				}
+			}
+			catch {
+				// interaction expired or already handled
+			}
 		}
 	},
 };

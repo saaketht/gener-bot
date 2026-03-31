@@ -4,11 +4,14 @@ import { userItems } from './UserItems';
 import { users } from './Users';
 import { trackedFlights } from './TrackedFlights';
 
+import { join } from 'path';
+
 const sequelize = new Sequelize('database', 'username', 'password', {
 	host: 'localhost',
 	dialect: 'sqlite',
 	logging: false,
-	storage: 'database.sqlite',
+	// resolve relative to project root, not cwd, so the DB survives deploys
+	storage: join(__dirname, '..', '..', 'database.sqlite'),
 });
 
 const CurrencyShop = currencyShop(sequelize);
