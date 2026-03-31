@@ -131,8 +131,5 @@ temp/
 # AI assistant context
 CLAUDE.md
 
-# Prompt files (SCP'd separately, like .env)
-prompts/
-
 # Plans/specs
 plans/
