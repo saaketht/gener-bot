@@ -6,6 +6,8 @@ import { MessageEvent } from '../../types';
 import { rateLimiter } from '../../utils/rateLimiter';
 import logger from '../../utils/logger';
 import { getAiResponseEmbed, getAiErrorEmbed } from '../../embeds/embeds';
+import { COMMAND_MANIFEST } from '../../utils/commandManifest';
+import { fetchUserContext, fetchUserProfile, updateUserProfile } from '../../utils/userContext';
 
 const grok = new OpenAI({
 	apiKey: process.env.GROK_API_KEY!,
@@ -33,6 +35,13 @@ function loadPrompt(filename: string): string {
 }
 
 const SYSTEM_PROMPT = loadPrompt('generbot.txt');
+
+function buildSystemPrompt(userContextStr: string, profileNotes: string | null): string {
+	let prompt = SYSTEM_PROMPT + '\n\nBot capabilities (mention casually when relevant, don\'t list them all):\n' + COMMAND_MANIFEST;
+	if (profileNotes) prompt += '\n\nAbout this user:\n' + profileNotes;
+	prompt += '\n\nUser data: ' + userContextStr;
+	return prompt;
+}
 
 function chunkText(text: string, maxLen = 2000): string[] {
 	const chunks: string[] = [];
@@ -231,13 +240,20 @@ const messageEvent: MessageEvent = {
 			// Show typing indicator
 			await message.channel.sendTyping();
 
+			// Fetch user context and profile in parallel for enriched system prompt
+			const [userContextStr, profileNotes] = await Promise.all([
+				fetchUserContext(message.author.id),
+				fetchUserProfile(message.author.id),
+			]);
+			const systemPrompt = buildSystemPrompt(userContextStr, profileNotes);
+
 			// Build messages array — with history if replying
 			let messages: Array<{ role: string; content: any }>;
 
 			if (isReply) {
 				const history = await walkReplyChain(message, botId);
 				messages = [
-					{ role: 'system', content: SYSTEM_PROMPT },
+					{ role: 'system', content: systemPrompt },
 					...history,
 				];
 				logger.info(`Conversation history: ${history.length} messages`);
@@ -247,7 +263,7 @@ const messageEvent: MessageEvent = {
 					{ ...message, content: textPrompt } as Message,
 				);
 				messages = [
-					{ role: 'system', content: SYSTEM_PROMPT },
+					{ role: 'system', content: systemPrompt },
 					{ role: 'user', content: userContent },
 				];
 			}
@@ -304,6 +320,9 @@ const messageEvent: MessageEvent = {
 				}
 			}
 			cacheResponse(sentIds, completion);
+
+			// Async profile update — fire and forget, never blocks response
+			updateUserProfile(message.author.id, textPrompt + '\n' + completion, profileNotes);
 
 			// Store for "delete" command
 			if (sentIds.length > 0) {

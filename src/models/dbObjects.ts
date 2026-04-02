@@ -3,6 +3,7 @@ import { currencyShop } from './CurrencyShop';
 import { userItems } from './UserItems';
 import { users } from './Users';
 import { trackedFlights } from './TrackedFlights';
+import { userProfiles } from './UserProfiles';
 
 import { join } from 'path';
 
@@ -18,6 +19,8 @@ const CurrencyShop = currencyShop(sequelize);
 const UserItems = userItems(sequelize);
 const Users = users(sequelize);
 const TrackedFlights = trackedFlights(sequelize);
+const UserProfiles = userProfiles(sequelize);
+UserProfiles.sync(); // auto-create table if missing
 
 UserItems.belongsTo(CurrencyShop, { foreignKey: 'item_id', as: 'item' });
 
@@ -52,4 +55,5 @@ export {
 	CurrencyShop,
 	UserItems,
 	TrackedFlights,
+	UserProfiles,
 };
