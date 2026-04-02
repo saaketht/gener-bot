@@ -209,7 +209,7 @@ async function main() {
 	if (dryRun) console.log('DRY RUN — no DB writes\n');
 
 	const botId = await fetchBotId();
-	const messages = await scrapeChannel(channelId, sinceMs);
+	const messages = await scrapeChannel(channelId!, sinceMs);
 	const byUser = pairExchanges(messages, botId);
 
 	if (byUser.size === 0) {
