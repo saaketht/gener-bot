@@ -44,7 +44,7 @@ export async function fetchUserProfile(userId: string): Promise<string | null> {
 export function updateUserProfile(userId: string, recentExchange: string, existingNotes: string | null): void {
 	(async () => {
 		try {
-			const [profile, created] = await (UserProfiles as any).findOrCreate({
+			const [profile] = await (UserProfiles as any).findOrCreate({
 				where: { user_id: userId },
 				defaults: { user_id: userId, interaction_count: 0, notes: null, last_updated: null },
 			});
