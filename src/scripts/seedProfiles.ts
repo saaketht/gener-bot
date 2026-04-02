@@ -21,11 +21,17 @@ import { UserProfiles } from '../models/dbObjects';
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const DISCORD_API = 'https://discord.com/api/v10';
-const BOT_TOKEN   = process.env.token;
-const GROK_KEY    = process.env.GROK_API_KEY;
+const BOT_TOKEN = process.env.token;
+const GROK_KEY = process.env.GROK_API_KEY;
 
-if (!BOT_TOKEN) { console.error('Missing env var: token'); process.exit(1); }
-if (!GROK_KEY)  { console.error('Missing env var: GROK_API_KEY'); process.exit(1); }
+if (!BOT_TOKEN) {
+	console.error('Missing env var: token');
+	process.exit(1);
+}
+if (!GROK_KEY) {
+	console.error('Missing env var: GROK_API_KEY');
+	process.exit(1);
+}
 
 const grok = new OpenAI({ apiKey: GROK_KEY, baseURL: 'https://api.x.ai/v1' });
 
@@ -37,8 +43,8 @@ function arg(flag: string): string | undefined {
 }
 
 const channelId = arg('--channel');
-const daysBack  = parseInt(arg('--days') ?? '30', 10);
-const dryRun    = process.argv.includes('--dry-run');
+const daysBack = parseInt(arg('--days') ?? '30', 10);
+const dryRun = process.argv.includes('--dry-run');
 
 if (!channelId) {
 	console.error('Usage: npm run seed-profiles -- --channel <channelId> [--days <n>] [--dry-run]');
@@ -88,7 +94,7 @@ async function scrapeChannel(channel: string, sinceMs: number): Promise<DiscordM
 	let fetched = 0;
 
 	process.stdout.write('Fetching messages');
-	while (true) {
+	for (;;) {
 		const batch = await fetchMessages(channel, before);
 		if (batch.length === 0) break;
 
@@ -221,7 +227,7 @@ async function main() {
 			continue;
 		}
 
-		process.stdout.write(`    → generating notes...`);
+		process.stdout.write('    → generating notes...');
 		const notes = await generateNotes(username, exchanges);
 		console.log(' done');
 		console.log(`    notes: ${notes}\n`);
