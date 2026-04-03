@@ -70,6 +70,14 @@ async function fetchMessages(channel: string, before?: string): Promise<DiscordM
 		headers: { Authorization: `Bot ${BOT_TOKEN}` },
 	});
 
+	if (res.status === 429) {
+		const body: any = await res.json();
+		const waitMs = Math.ceil((body.retry_after ?? 1) * 1000);
+		process.stdout.write(` [rate limited, waiting ${waitMs}ms]`);
+		await new Promise(r => setTimeout(r, waitMs));
+		return fetchMessages(channel, before);
+	}
+
 	if (!res.ok) {
 		const body = await res.text();
 		throw new Error(`Discord API ${res.status}: ${body}`);
