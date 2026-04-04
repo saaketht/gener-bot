@@ -20,8 +20,8 @@ const UserItems = userItems(sequelize);
 const Users = users(sequelize);
 const TrackedFlights = trackedFlights(sequelize);
 const UserProfiles = userProfiles(sequelize);
-// auto-create table if missing
-UserProfiles.sync();
+// auto-create all missing tables at startup
+sequelize.sync();
 
 UserItems.belongsTo(CurrencyShop, { foreignKey: 'item_id', as: 'item' });
 
