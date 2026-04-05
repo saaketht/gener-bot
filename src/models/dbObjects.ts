@@ -4,6 +4,7 @@ import { userItems } from './UserItems';
 import { users } from './Users';
 import { trackedFlights } from './TrackedFlights';
 import { userProfiles } from './UserProfiles';
+import { watchedTickers } from './WatchedTickers';
 
 import { join } from 'path';
 
@@ -20,6 +21,7 @@ const UserItems = userItems(sequelize);
 const Users = users(sequelize);
 const TrackedFlights = trackedFlights(sequelize);
 const UserProfiles = userProfiles(sequelize);
+const WatchedTickers = watchedTickers(sequelize);
 // auto-create all missing tables at startup
 sequelize.sync();
 
@@ -57,4 +59,5 @@ export {
 	UserItems,
 	TrackedFlights,
 	UserProfiles,
+	WatchedTickers,
 };

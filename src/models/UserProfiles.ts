@@ -6,6 +6,11 @@ const userProfiles = (sequelize: Sequelize) => {
 			type: DataTypes.STRING,
 			primaryKey: true,
 		},
+		username: {
+			type: DataTypes.STRING,
+			allowNull: true,
+			defaultValue: null,
+		},
 		notes: {
 			type: DataTypes.TEXT,
 			allowNull: true,

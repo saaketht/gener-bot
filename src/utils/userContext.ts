@@ -41,13 +41,18 @@ export async function fetchUserProfile(userId: string): Promise<string | null> {
 	}
 }
 
-export function updateUserProfile(userId: string, recentExchange: string, existingNotes: string | null): void {
+export function updateUserProfile(userId: string, username: string, recentExchange: string, existingNotes: string | null): void {
 	(async () => {
 		try {
 			const [profile] = await (UserProfiles as any).findOrCreate({
 				where: { user_id: userId },
-				defaults: { user_id: userId, interaction_count: 0, notes: null, last_updated: null },
+				defaults: { user_id: userId, username, interaction_count: 0, notes: null, last_updated: null },
 			});
+
+			// Keep username up to date
+			if (profile.username !== username) {
+				profile.username = username;
+			}
 
 			const newCount = (profile.interaction_count ?? 0) + 1;
 			profile.interaction_count = newCount;

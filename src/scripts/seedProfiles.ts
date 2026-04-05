@@ -243,6 +243,7 @@ async function main() {
 		if (!dryRun) {
 			await (UserProfiles as any).upsert({
 				user_id: userId,
+				username,
 				notes,
 				interaction_count: exchanges.length,
 				last_updated: new Date(),

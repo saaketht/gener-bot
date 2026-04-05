@@ -8,6 +8,7 @@ import logger from '../../utils/logger';
 import { getAiResponseEmbed, getAiErrorEmbed } from '../../embeds/embeds';
 import { COMMAND_MANIFEST } from '../../utils/commandManifest';
 import { fetchUserContext, fetchUserProfile, updateUserProfile } from '../../utils/userContext';
+import { WatchedTickers, UserProfiles } from '../../models/dbObjects';
 
 const grok = new OpenAI({
 	apiKey: process.env.GROK_API_KEY!,
@@ -76,6 +77,101 @@ function cacheResponse(messageIds: string[], fullText: string) {
 			responseCache.delete(keys.next().value!);
 		}
 	}
+}
+
+const TOOLS: OpenAI.ChatCompletionTool[] = [
+	{
+		type: 'function',
+		function: {
+			name: 'lookup_ticker',
+			description: 'Look up whether a symbol is a tracked financial instrument (stock, crypto, commodity, ETF). Call this BEFORE discussing any financial instrument to verify it exists.',
+			parameters: {
+				type: 'object',
+				properties: {
+					symbol: { type: 'string', description: 'The ticker symbol to look up, e.g. AAPL, BTC, SPY' },
+				},
+				required: ['symbol'],
+			},
+		},
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'lookup_user',
+			description: 'Look up another user\'s profile and personality notes. Use when someone asks about, mentions, or references another person in the server — by name or by @mention.',
+			parameters: {
+				type: 'object',
+				properties: {
+					user: { type: 'string', description: 'Username or Discord user ID (from <@id> mentions) to look up' },
+				},
+				required: ['user'],
+			},
+		},
+	},
+];
+
+async function lookupTicker(symbol: string, guildId: string | null): Promise<string> {
+	if (!guildId) return JSON.stringify({ found: false, message: 'not a known financial instrument' });
+
+	const ticker: any = await WatchedTickers.findOne({
+		where: {
+			symbol: symbol.toUpperCase(),
+			guild_id: guildId,
+		},
+	});
+
+	if (ticker) {
+		return JSON.stringify({
+			found: true,
+			symbol: ticker.symbol,
+			name: ticker.name,
+			type: ticker.type,
+		});
+	}
+
+	return JSON.stringify({ found: false, message: `${symbol.toUpperCase()} is not a known tracked instrument` });
+}
+
+async function lookupUser(userQuery: string, message: Message): Promise<string> {
+	// Strip <@> mention syntax to get raw ID
+	const idMatch = userQuery.match(/^<?@?(\d{17,20})>?$/);
+	let profile: any = null;
+
+	if (idMatch) {
+		// Direct ID lookup
+		profile = await UserProfiles.findOne({ where: { user_id: idMatch[1] } });
+	}
+	else {
+		// Search by stored username first (case-insensitive)
+		const allProfiles: any[] = await UserProfiles.findAll();
+		profile = allProfiles.find(
+			p => p.username && p.username.toLowerCase() === userQuery.toLowerCase(),
+		);
+
+		// Fallback to Discord API if not found in DB
+		if (!profile && message.guild) {
+			const members = await message.guild.members.fetch({ query: userQuery, limit: 1 });
+			const member = members.first();
+			if (member) {
+				profile = await UserProfiles.findOne({ where: { user_id: member.id } });
+			}
+		}
+	}
+
+	if (!profile) {
+		return JSON.stringify({ found: false, message: `no user found matching "${userQuery}"` });
+	}
+
+	if (!profile.notes) {
+		return JSON.stringify({ found: true, user_id: profile.user_id, username: profile.username, notes: null, message: 'no profile notes yet for this user' });
+	}
+
+	return JSON.stringify({
+		found: true,
+		user_id: profile.user_id,
+		username: profile.username,
+		notes: profile.notes,
+	});
 }
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/jpg'];
@@ -268,13 +364,54 @@ const messageEvent: MessageEvent = {
 				];
 			}
 
-			const response = await grok.chat.completions.create({
+			const guildId = message.guildId;
+
+			let response = await grok.chat.completions.create({
 				model: MODEL,
 				max_tokens: MAX_TOKENS,
 				messages: messages as any,
+				tools: TOOLS,
 			}, { signal: abortController.signal });
 
 			if (abortController.signal.aborted) return;
+
+			// Handle tool calls — one round-trip max
+			const toolCalls = response.choices[0]?.message?.tool_calls;
+			if (toolCalls && toolCalls.length > 0) {
+				messages.push(response.choices[0].message as any);
+
+				for (const toolCall of toolCalls) {
+					const args = JSON.parse(toolCall.function.arguments);
+					let result: string;
+
+					if (toolCall.function.name === 'lookup_ticker') {
+						result = await lookupTicker(args.symbol, guildId);
+						logger.info(`lookup_ticker(${args.symbol}) → ${result}`);
+					}
+					else if (toolCall.function.name === 'lookup_user') {
+						result = await lookupUser(args.user, message);
+						logger.info(`lookup_user(${args.user}) → ${result}`);
+					}
+					else {
+						result = JSON.stringify({ error: 'unknown tool' });
+					}
+
+					messages.push({
+						role: 'tool',
+						content: result,
+						tool_call_id: toolCall.id,
+					} as any);
+				}
+
+				response = await grok.chat.completions.create({
+					model: MODEL,
+					max_tokens: MAX_TOKENS,
+					messages: messages as any,
+					tools: TOOLS,
+				}, { signal: abortController.signal });
+
+				if (abortController.signal.aborted) return;
+			}
 
 			const completion = response.choices[0]?.message?.content ?? '';
 			const reasoning = (response.choices[0]?.message as any)?.reasoning ?? '';
@@ -322,7 +459,7 @@ const messageEvent: MessageEvent = {
 			cacheResponse(sentIds, completion);
 
 			// Async profile update — fire and forget, never blocks response
-			updateUserProfile(message.author.id, textPrompt + '\n' + completion, profileNotes);
+			updateUserProfile(message.author.id, message.author.username, textPrompt + '\n' + completion, profileNotes);
 
 			// Store for "delete" command
 			if (sentIds.length > 0) {
