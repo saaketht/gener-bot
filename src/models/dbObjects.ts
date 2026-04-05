@@ -12,8 +12,8 @@ const sequelize = new Sequelize('database', 'username', 'password', {
 	host: 'localhost',
 	dialect: 'sqlite',
 	logging: false,
-	// resolve relative to project root, not cwd, so the DB survives deploys
-	storage: join(__dirname, '..', '..', 'database.sqlite'),
+	// resolve to project root regardless of ts-node (src/models/) or compiled (built/src/models/)
+	storage: join(__dirname, ...(__dirname.includes('built') ? ['..', '..', '..'] : ['..', '..']), 'database.sqlite'),
 });
 
 const CurrencyShop = currencyShop(sequelize);
