@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { join, resolve } from 'path';
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import { Message } from 'discord.js';
 import { MessageEvent } from '../../types';
 import { rateLimiter } from '../../utils/rateLimiter';
@@ -15,10 +16,30 @@ const grok = new OpenAI({
 	baseURL: 'https://api.x.ai/v1',
 });
 
+const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+
 const MODEL = 'grok-4.20-0309-non-reasoning';
+const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const MAX_TOKENS = 512;
 const MAX_HISTORY = 20;
 const DEFAULT_PROMPT = 'You are generbot, a concise and direct AI assistant.';
+
+// Detect financial intent: $TICKER notation or explicit financial keywords
+const FINANCIAL_TICKER_RE = /\$[A-Za-z]{1,6}\b/;
+const FINANCIAL_KW_RE = /\b(price|option|beta|volume|market.?cap|earnings|dividend|ticker|stock|crypto|etf|put|call|implied.?vol|iv.?rank|p\/e|short.?interest|float|shares|bullish|bearish|expir|strike|hedge|portfolio)\b/i;
+
+function isFinancialQuery(text: string): boolean {
+	return FINANCIAL_TICKER_RE.test(text) || FINANCIAL_KW_RE.test(text);
+}
+
+const FINANCIAL_SYSTEM_PROMPT = `You are generbot, a Discord bot. You've been routed a financial query — be factual and grounded.
+
+Rules:
+- Ground every claim in what lookup_ticker returns. Never state metrics (beta, volume, market cap, IV) that the tool didn't return.
+- If lookup_ticker returns found: false, say the symbol isn't tracked. Don't speculate on what it might be. Don't call it a shitcoin, token, or anything else.
+- 1-3 sentences. No markdown. No bullet points. Lowercase is fine.
+- Sharp and direct. Not your financial advisor — but don't repeat that disclaimer every time.
+- The first word of the user's message is their name.`;
 
 function loadPrompt(filename: string): string {
 	// ts-node: src/commands/message-events/ → 3 up = root
@@ -39,6 +60,13 @@ const SYSTEM_PROMPT = loadPrompt('generbot.txt');
 
 function buildSystemPrompt(userContextStr: string, profileNotes: string | null): string {
 	let prompt = SYSTEM_PROMPT + '\n\nBot capabilities (mention casually when relevant, don\'t list them all):\n' + COMMAND_MANIFEST;
+	if (profileNotes) prompt += '\n\nAbout this user:\n' + profileNotes;
+	prompt += '\n\nUser data: ' + userContextStr;
+	return prompt;
+}
+
+function buildFinancialSystemPrompt(userContextStr: string, profileNotes: string | null): string {
+	let prompt = FINANCIAL_SYSTEM_PROMPT;
 	if (profileNotes) prompt += '\n\nAbout this user:\n' + profileNotes;
 	prompt += '\n\nUser data: ' + userContextStr;
 	return prompt;
@@ -106,6 +134,31 @@ const TOOLS: OpenAI.ChatCompletionTool[] = [
 				},
 				required: ['user'],
 			},
+		},
+	},
+];
+
+const CLAUDE_TOOLS: Anthropic.Tool[] = [
+	{
+		name: 'lookup_ticker',
+		description: 'Look up whether a symbol is a tracked financial instrument (stock, crypto, commodity, ETF). Always call this before stating anything about a financial instrument.',
+		input_schema: {
+			type: 'object' as const,
+			properties: {
+				symbol: { type: 'string', description: 'The ticker symbol to look up, e.g. AAPL, BTC, SPY' },
+			},
+			required: ['symbol'],
+		},
+	},
+	{
+		name: 'lookup_user',
+		description: 'Look up another user\'s profile and personality notes. Use when someone asks about, mentions, or references another person in the server — by name or by @mention.',
+		input_schema: {
+			type: 'object' as const,
+			properties: {
+				user: { type: 'string', description: 'Username or Discord user ID (from <@id> mentions) to look up' },
+			},
+			required: ['user'],
 		},
 	},
 ];
@@ -270,6 +323,70 @@ async function isReplyToBot(message: Message, botId: string): Promise<boolean> {
 	}
 }
 
+// Claude-based financial response — grounded in tool data, no hallucination
+async function getClaudeFinancialResponse(
+	systemPrompt: string,
+	userText: string,
+	guildId: string | null,
+	message: Message,
+	signal: AbortSignal,
+): Promise<string> {
+	const anthropicMessages: Anthropic.MessageParam[] = [
+		{ role: 'user', content: userText },
+	];
+
+	let response = await claude.messages.create({
+		model: CLAUDE_MODEL,
+		max_tokens: MAX_TOKENS,
+		system: systemPrompt,
+		messages: anthropicMessages,
+		tools: CLAUDE_TOOLS,
+	});
+
+	if (signal.aborted) return '';
+
+	// Handle tool use — one round-trip
+	if (response.stop_reason === 'tool_use') {
+		const toolUseBlocks = response.content.filter(
+			(b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
+		);
+
+		anthropicMessages.push({ role: 'assistant', content: response.content });
+
+		const toolResults: Anthropic.ToolResultBlockParam[] = [];
+		for (const toolUse of toolUseBlocks) {
+			let result: string;
+			if (toolUse.name === 'lookup_ticker') {
+				result = await lookupTicker((toolUse.input as any).symbol, guildId);
+				logger.info(`claude lookup_ticker(${(toolUse.input as any).symbol}) → ${result}`);
+			}
+			else if (toolUse.name === 'lookup_user') {
+				result = await lookupUser((toolUse.input as any).user, message);
+				logger.info(`claude lookup_user(${(toolUse.input as any).user}) → ${result}`);
+			}
+			else {
+				result = JSON.stringify({ error: 'unknown tool' });
+			}
+			toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: result });
+		}
+
+		anthropicMessages.push({ role: 'user', content: toolResults });
+
+		response = await claude.messages.create({
+			model: CLAUDE_MODEL,
+			max_tokens: MAX_TOKENS,
+			system: systemPrompt,
+			messages: anthropicMessages,
+			tools: CLAUDE_TOOLS,
+		});
+
+		if (signal.aborted) return '';
+	}
+
+	const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
+	return textBlock?.text ?? '';
+}
+
 const messageEvent: MessageEvent = {
 	name: 'ai-complete',
 	async execute(message: Message) {
@@ -327,7 +444,9 @@ const messageEvent: MessageEvent = {
 			return;
 		}
 
-		logger.info(`${message.author.username} ran ai: ${textPrompt.substring(0, 50)}...`);
+		const financial = isFinancialQuery(message.content);
+		const routedModel = financial ? CLAUDE_MODEL : MODEL;
+		logger.info(`${message.author.username} ran ai [${routedModel}]: ${textPrompt.substring(0, 50)}...`);
 
 		const abortController = new AbortController();
 		activeGenerations.set(channelId, abortController);
@@ -341,69 +460,48 @@ const messageEvent: MessageEvent = {
 				fetchUserContext(message.author.id),
 				fetchUserProfile(message.author.id),
 			]);
-			const systemPrompt = buildSystemPrompt(userContextStr, profileNotes);
 
-			// Build messages array — with history if replying
-			let messages: Array<{ role: string; content: any }>;
+			let completion: string;
 
-			if (isReply) {
-				const history = await walkReplyChain(message, botId);
-				messages = [
-					{ role: 'system', content: systemPrompt },
-					...history,
-				];
-				logger.info(`Conversation history: ${history.length} messages`);
+			if (financial) {
+				// Financial query → Claude (grounded, no hallucination)
+				const systemPrompt = buildFinancialSystemPrompt(userContextStr, profileNotes);
+				completion = await getClaudeFinancialResponse(
+					systemPrompt,
+					textPrompt,
+					message.guildId,
+					message,
+					abortController.signal,
+				);
 			}
 			else {
-				const userContent = buildContentParts(
-					{ ...message, content: textPrompt } as Message,
-				);
-				messages = [
-					{ role: 'system', content: systemPrompt },
-					{ role: 'user', content: userContent },
-				];
-			}
+				// Chat/banter → Grok
+				const systemPrompt = buildSystemPrompt(userContextStr, profileNotes);
 
-			const guildId = message.guildId;
+				// Build messages array — with history if replying
+				let messages: Array<{ role: string; content: any }>;
 
-			let response = await grok.chat.completions.create({
-				model: MODEL,
-				max_tokens: MAX_TOKENS,
-				messages: messages as any,
-				tools: TOOLS,
-			}, { signal: abortController.signal });
-
-			if (abortController.signal.aborted) return;
-
-			// Handle tool calls — one round-trip max
-			const toolCalls = response.choices[0]?.message?.tool_calls;
-			if (toolCalls && toolCalls.length > 0) {
-				messages.push(response.choices[0].message as any);
-
-				for (const toolCall of toolCalls) {
-					const args = JSON.parse(toolCall.function.arguments);
-					let result: string;
-
-					if (toolCall.function.name === 'lookup_ticker') {
-						result = await lookupTicker(args.symbol, guildId);
-						logger.info(`lookup_ticker(${args.symbol}) → ${result}`);
-					}
-					else if (toolCall.function.name === 'lookup_user') {
-						result = await lookupUser(args.user, message);
-						logger.info(`lookup_user(${args.user}) → ${result}`);
-					}
-					else {
-						result = JSON.stringify({ error: 'unknown tool' });
-					}
-
-					messages.push({
-						role: 'tool',
-						content: result,
-						tool_call_id: toolCall.id,
-					} as any);
+				if (isReply) {
+					const history = await walkReplyChain(message, botId);
+					messages = [
+						{ role: 'system', content: systemPrompt },
+						...history,
+					];
+					logger.info(`Conversation history: ${history.length} messages`);
+				}
+				else {
+					const userContent = buildContentParts(
+						{ ...message, content: textPrompt } as Message,
+					);
+					messages = [
+						{ role: 'system', content: systemPrompt },
+						{ role: 'user', content: userContent },
+					];
 				}
 
-				response = await grok.chat.completions.create({
+				const guildId = message.guildId;
+
+				let response = await grok.chat.completions.create({
 					model: MODEL,
 					max_tokens: MAX_TOKENS,
 					messages: messages as any,
@@ -411,36 +509,74 @@ const messageEvent: MessageEvent = {
 				}, { signal: abortController.signal });
 
 				if (abortController.signal.aborted) return;
-			}
 
-			const completion = response.choices[0]?.message?.content ?? '';
-			const reasoning = (response.choices[0]?.message as any)?.reasoning ?? '';
+				// Handle tool calls — one round-trip max
+				const toolCalls = response.choices[0]?.message?.tool_calls;
+				if (toolCalls && toolCalls.length > 0) {
+					messages.push(response.choices[0].message as any);
+
+					for (const toolCall of toolCalls) {
+						const args = JSON.parse(toolCall.function.arguments);
+						let result: string;
+
+						if (toolCall.function.name === 'lookup_ticker') {
+							result = await lookupTicker(args.symbol, guildId);
+							logger.info(`lookup_ticker(${args.symbol}) → ${result}`);
+						}
+						else if (toolCall.function.name === 'lookup_user') {
+							result = await lookupUser(args.user, message);
+							logger.info(`lookup_user(${args.user}) → ${result}`);
+						}
+						else {
+							result = JSON.stringify({ error: 'unknown tool' });
+						}
+
+						messages.push({
+							role: 'tool',
+							content: result,
+							tool_call_id: toolCall.id,
+						} as any);
+					}
+
+					response = await grok.chat.completions.create({
+						model: MODEL,
+						max_tokens: MAX_TOKENS,
+						messages: messages as any,
+						tools: TOOLS,
+					}, { signal: abortController.signal });
+
+					if (abortController.signal.aborted) return;
+				}
+
+				completion = response.choices[0]?.message?.content ?? '';
+
+				const reasoning = (response.choices[0]?.message as any)?.reasoning ?? '';
+				const tokens = response.usage;
+				logger.info(`tokens used { input: ${tokens?.prompt_tokens}, output: ${tokens?.completion_tokens} }, total: ${(tokens?.prompt_tokens ?? 0) + (tokens?.completion_tokens ?? 0)}`);
+
+				// Send reasoning first, italicized
+				if (reasoning) {
+					const thinkingLines = reasoning.split('\n').filter((line: string) => line.trim() !== '');
+					await message.channel.send('* ' + MODEL + ' thinking*');
+					for (const _line of thinkingLines) {
+						// TODO: send thinking chunks with delay
+					}
+				}
+			}
 
 			if (!completion) {
 				await message.reply('Unable to generate response.');
 				return;
 			}
 
-			const tokens = response.usage;
-			logger.info(`tokens used { input: ${tokens?.prompt_tokens}, output: ${tokens?.completion_tokens} }, total: ${(tokens?.prompt_tokens ?? 0) + (tokens?.completion_tokens ?? 0)}`);
-
 			const _embed = getAiResponseEmbed(message.author, {
-				model: MODEL,
+				model: routedModel,
 				prompt: textPrompt,
 				response: completion,
-				inputTokens: tokens?.prompt_tokens ?? 0,
-				outputTokens: tokens?.completion_tokens ?? 0,
+				inputTokens: 0,
+				outputTokens: 0,
 				success: true,
 			});
-
-			// Send reasoning first, italicized
-			if (reasoning) {
-				const thinkingLines = reasoning.split('\n').filter((line: string) => line.trim() !== '');
-				await message.channel.send('* ' + MODEL + ' thinking*');
-				for (const _line of thinkingLines) {
-					// TODO: send thinking chunks with delay
-				}
-			}
 
 			// Send actual response and cache message IDs
 			const sentIds: string[] = [];
@@ -472,7 +608,7 @@ const messageEvent: MessageEvent = {
 		}
 		catch (error) {
 			if (abortController.signal.aborted) return;
-			logger.error('Grok API error:', error);
+			logger.error('AI API error:', error);
 			const errorEmbed = getAiErrorEmbed(
 				message.author,
 				'Sorry, something went wrong with the AI. Try again later.',
