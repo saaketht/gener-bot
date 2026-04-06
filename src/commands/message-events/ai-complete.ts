@@ -36,7 +36,7 @@ const FINANCIAL_SYSTEM_PROMPT = `You are generbot, a Discord bot. You've been ro
 
 Rules:
 - Call lookup_ticker FIRST before saying anything about any symbol or instrument. No exceptions.
-- Only state what the tool returns. Never add metrics (beta, volume, market cap, IV, price) from your own knowledge.
+- For live data (price, volume, news, earnings), use web_search. Only state figures you retrieved — never invent numbers.
 - If lookup_ticker returns found: false, say the symbol isn't tracked and stop. Don't describe what it might be, don't call it a shitcoin, token, coin, or anything else.
 - 1-3 sentences. No markdown. No bullet points. Lowercase is fine.
 - Sharp and direct. Not your financial advisor — but don't repeat that disclaimer every time.
@@ -139,7 +139,12 @@ const TOOLS: OpenAI.ChatCompletionTool[] = [
 	},
 ];
 
-const CLAUDE_TOOLS: Anthropic.Tool[] = [
+const CLAUDE_TOOLS: Array<Anthropic.Tool | { type: string; name: string; max_uses: number }> = [
+	{
+		type: 'web_search_20250305',
+		name: 'web_search',
+		max_uses: 3,
+	},
 	{
 		name: 'lookup_ticker',
 		description: 'Look up whether a symbol is a tracked financial instrument (stock, crypto, commodity, ETF). Always call this before stating anything about a financial instrument.',
