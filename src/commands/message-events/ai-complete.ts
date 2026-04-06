@@ -10,6 +10,7 @@ import { getAiResponseEmbed, getAiErrorEmbed } from '../../embeds/embeds';
 import { COMMAND_MANIFEST } from '../../utils/commandManifest';
 import { fetchUserContext, fetchUserProfile, updateUserProfile } from '../../utils/userContext';
 import { WatchedTickers, UserProfiles } from '../../models/dbObjects';
+import { getPrice } from '../../utils/priceApi';
 
 const grok = new OpenAI({
 	apiKey: process.env.GROK_API_KEY!,
@@ -35,8 +36,9 @@ function isFinancialQuery(text: string): boolean {
 const FINANCIAL_SYSTEM_PROMPT = `You are generbot, a Discord bot. You've been routed a financial query — be factual and grounded.
 
 Rules:
-- Ground every claim in what lookup_ticker returns. Never state metrics (beta, volume, market cap, IV) that the tool didn't return.
-- If lookup_ticker returns found: false, say the symbol isn't tracked. Don't speculate on what it might be. Don't call it a shitcoin, token, or anything else.
+- Call lookup_ticker FIRST before saying anything about any symbol or instrument. No exceptions.
+- For live data (price, volume, news, earnings), use web_search. Only state figures you retrieved — never invent numbers.
+- If lookup_ticker returns found: false, say the symbol isn't tracked and stop. Don't describe what it might be, don't call it a shitcoin, token, coin, or anything else.
 - 1-3 sentences. No markdown. No bullet points. Lowercase is fine.
 - Sharp and direct. Not your financial advisor — but don't repeat that disclaimer every time.
 - The first word of the user's message is their name.`;
@@ -138,7 +140,23 @@ const TOOLS: OpenAI.ChatCompletionTool[] = [
 	},
 ];
 
-const CLAUDE_TOOLS: Anthropic.Tool[] = [
+const CLAUDE_TOOLS: Array<Anthropic.Tool | { type: string; name: string; max_uses: number }> = [
+	{
+		type: 'web_search_20250305',
+		name: 'web_search',
+		max_uses: 3,
+	},
+	{
+		name: 'get_price',
+		description: 'Get the current price and basic quote data for a stock, ETF, or crypto symbol. Use this for any question about current price, daily change, high/low, or price action. Prefer this over web_search for price data.',
+		input_schema: {
+			type: 'object' as const,
+			properties: {
+				symbol: { type: 'string', description: 'Ticker symbol, e.g. AAPL, BTC, SPY' },
+			},
+			required: ['symbol'],
+		},
+	},
 	{
 		name: 'lookup_ticker',
 		description: 'Look up whether a symbol is a tracked financial instrument (stock, crypto, commodity, ETF). Always call this before stating anything about a financial instrument.',
@@ -356,7 +374,15 @@ async function getClaudeFinancialResponse(
 		const toolResults: Anthropic.ToolResultBlockParam[] = [];
 		for (const toolUse of toolUseBlocks) {
 			let result: string;
-			if (toolUse.name === 'lookup_ticker') {
+			if (toolUse.name === 'get_price') {
+				const sym = (toolUse.input as any).symbol as string;
+				const priceData = await getPrice(sym);
+				result = priceData
+					? JSON.stringify(priceData)
+					: JSON.stringify({ found: false, message: `no price data available for ${sym.toUpperCase()}` });
+				logger.info(`claude get_price(${sym}) → ${result}`);
+			}
+			else if (toolUse.name === 'lookup_ticker') {
 				result = await lookupTicker((toolUse.input as any).symbol, guildId);
 				logger.info(`claude lookup_ticker(${(toolUse.input as any).symbol}) → ${result}`);
 			}

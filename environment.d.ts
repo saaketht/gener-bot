@@ -10,6 +10,7 @@ declare global {
             ANTHROPIC_API_KEY: string;
             AI_SYSTEM_PROMPT: string;
             GROK_API_KEY: string;
+            FINNHUB_API_KEY: string;
             // APIs
             rapidApiKey: string;
             FLIGHTAWARE_API_KEY: string;
