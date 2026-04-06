@@ -10,6 +10,7 @@ import { getAiResponseEmbed, getAiErrorEmbed } from '../../embeds/embeds';
 import { COMMAND_MANIFEST } from '../../utils/commandManifest';
 import { fetchUserContext, fetchUserProfile, updateUserProfile } from '../../utils/userContext';
 import { WatchedTickers, UserProfiles } from '../../models/dbObjects';
+import { getPrice } from '../../utils/priceApi';
 
 const grok = new OpenAI({
 	apiKey: process.env.GROK_API_KEY!,
@@ -144,6 +145,17 @@ const CLAUDE_TOOLS: Array<Anthropic.Tool | { type: string; name: string; max_use
 		type: 'web_search_20250305',
 		name: 'web_search',
 		max_uses: 3,
+	},
+	{
+		name: 'get_price',
+		description: 'Get the current price and basic quote data for a stock, ETF, or crypto symbol. Use this for any question about current price, daily change, high/low, or price action. Prefer this over web_search for price data.',
+		input_schema: {
+			type: 'object' as const,
+			properties: {
+				symbol: { type: 'string', description: 'Ticker symbol, e.g. AAPL, BTC, SPY' },
+			},
+			required: ['symbol'],
+		},
 	},
 	{
 		name: 'lookup_ticker',
@@ -362,7 +374,15 @@ async function getClaudeFinancialResponse(
 		const toolResults: Anthropic.ToolResultBlockParam[] = [];
 		for (const toolUse of toolUseBlocks) {
 			let result: string;
-			if (toolUse.name === 'lookup_ticker') {
+			if (toolUse.name === 'get_price') {
+				const sym = (toolUse.input as any).symbol as string;
+				const priceData = await getPrice(sym);
+				result = priceData
+					? JSON.stringify(priceData)
+					: JSON.stringify({ found: false, message: `no price data available for ${sym.toUpperCase()}` });
+				logger.info(`claude get_price(${sym}) → ${result}`);
+			}
+			else if (toolUse.name === 'lookup_ticker') {
 				result = await lookupTicker((toolUse.input as any).symbol, guildId);
 				logger.info(`claude lookup_ticker(${(toolUse.input as any).symbol}) → ${result}`);
 			}
