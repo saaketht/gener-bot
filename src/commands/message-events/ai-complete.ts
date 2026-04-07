@@ -358,7 +358,7 @@ async function getClaudeFinancialResponse(
 		max_tokens: MAX_TOKENS,
 		system: systemPrompt,
 		messages: anthropicMessages,
-		tools: CLAUDE_TOOLS,
+		tools: CLAUDE_TOOLS as any,
 	});
 
 	if (signal.aborted) return '';
@@ -403,7 +403,7 @@ async function getClaudeFinancialResponse(
 			max_tokens: MAX_TOKENS,
 			system: systemPrompt,
 			messages: anthropicMessages,
-			tools: CLAUDE_TOOLS,
+			tools: CLAUDE_TOOLS as any,
 		});
 
 		if (signal.aborted) return '';
