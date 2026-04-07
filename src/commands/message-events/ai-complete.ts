@@ -363,8 +363,11 @@ async function getClaudeFinancialResponse(
 
 	if (signal.aborted) return '';
 
-	// Handle tool use — one round-trip
-	if (response.stop_reason === 'tool_use') {
+	// Tool use loop — Claude may chain multiple tool calls (e.g. lookup_ticker → get_price → web_search)
+	const MAX_TOOL_ROUNDS = 5;
+	let rounds = 0;
+	while (response.stop_reason === 'tool_use' && rounds < MAX_TOOL_ROUNDS) {
+		rounds++;
 		const toolUseBlocks = response.content.filter(
 			(b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
 		);
@@ -391,10 +394,14 @@ async function getClaudeFinancialResponse(
 				logger.info(`claude lookup_user(${(toolUse.input as any).user}) → ${result}`);
 			}
 			else {
-				result = JSON.stringify({ error: 'unknown tool' });
+				// Unknown tool (e.g. server-side web_search) — Claude handles it itself, skip
+				continue;
 			}
 			toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: result });
 		}
+
+		// If only server-side tools were used, no client results to send back
+		if (toolResults.length === 0) break;
 
 		anthropicMessages.push({ role: 'user', content: toolResults });
 
@@ -409,8 +416,12 @@ async function getClaudeFinancialResponse(
 		if (signal.aborted) return '';
 	}
 
-	const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
-	return textBlock?.text ?? '';
+	const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === 'text');
+	const text = textBlocks.map(b => b.text).join('\n').trim();
+	if (!text) {
+		logger.warn(`claude returned no text. stop_reason=${response.stop_reason} rounds=${rounds} content_types=${response.content.map(b => b.type).join(',')}`);
+	}
+	return text;
 }
 
 const messageEvent: MessageEvent = {
