@@ -41,7 +41,7 @@ Rules:
 - If lookup_ticker returns found: false, say the symbol isn't tracked and stop. Don't describe what it might be, don't call it a shitcoin, token, coin, or anything else.
 - 1-3 sentences. No markdown. No bullet points. Lowercase is fine.
 - Sharp and direct. Not your financial advisor — but don't repeat that disclaimer every time.
-- The first word of the user's message is their name.`;
+- The first word of the user's message is their name. There is no need to start every message with it`;
 
 function loadPrompt(filename: string): string {
 	// ts-node: src/commands/message-events/ → 3 up = root
