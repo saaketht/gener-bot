@@ -140,7 +140,7 @@ const TOOLS: OpenAI.ChatCompletionTool[] = [
 	},
 ];
 
-const CLAUDE_TOOLS: Array<Anthropic.Tool | { type: string; name: string; max_uses: number }> = [
+const CLAUDE_TOOLS: Anthropic.Messages.ToolUnion[] = [
 	{
 		type: 'web_search_20250305',
 		name: 'web_search',
@@ -358,7 +358,7 @@ async function getClaudeFinancialResponse(
 		max_tokens: MAX_TOKENS,
 		system: systemPrompt,
 		messages: anthropicMessages,
-		tools: CLAUDE_TOOLS as any,
+		tools: CLAUDE_TOOLS,
 	});
 
 	if (signal.aborted) return '';
@@ -410,7 +410,7 @@ async function getClaudeFinancialResponse(
 			max_tokens: MAX_TOKENS,
 			system: systemPrompt,
 			messages: anthropicMessages,
-			tools: CLAUDE_TOOLS as any,
+			tools: CLAUDE_TOOLS,
 		});
 
 		if (signal.aborted) return '';
