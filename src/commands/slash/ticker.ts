@@ -13,16 +13,26 @@ const DEFAULT_TICKERS = [
 	{ symbol: 'HNT', name: 'Helium', type: 'crypto' },
 	{ symbol: 'LTC', name: 'Litecoin', type: 'crypto' },
 	{ symbol: 'DOGE', name: 'Dogecoin', type: 'crypto' },
-	{ symbol: 'SPY', name: 'S&P 500 ETF', type: 'etf' },
-	{ symbol: 'QQQ', name: 'Nasdaq 100 ETF', type: 'etf' },
-	{ symbol: 'GLD', name: 'Gold ETF', type: 'etf' },
-	{ symbol: 'SLV', name: 'Silver ETF', type: 'etf' },
+	{ symbol: 'SPY', name: 'S&P 500 ETF', type: 'stock' },
+	{ symbol: 'QQQ', name: 'Nasdaq 100 ETF', type: 'stock' },
+	{ symbol: 'GLD', name: 'Gold ETF', type: 'stock' },
+	{ symbol: 'SLV', name: 'Silver ETF', type: 'stock' },
+	{ symbol: 'AAPL', name: 'Apple', type: 'stock' },
+	{ symbol: 'NVDA', name: 'Nvidia', type: 'stock' },
+	{ symbol: 'MSFT', name: 'Microsoft', type: 'stock' },
+	{ symbol: 'TSLA', name: 'Tesla', type: 'stock' },
 	{ symbol: 'WTI', name: 'Crude Oil (WTI)', type: 'commodity' },
 	{ symbol: 'BRENT', name: 'Brent Crude', type: 'commodity' },
 	{ symbol: 'NATURAL_GAS', name: 'Natural Gas', type: 'commodity' },
 ];
 
 async function ensureDefaults(guildId: string, userId: string) {
+	// One-shot migration: collapse legacy 'etf' rows into 'stock'.
+	await WatchedTickers.update(
+		{ type: 'stock' },
+		{ where: { guild_id: guildId, type: 'etf' } },
+	);
+
 	const count = await WatchedTickers.count({ where: { guild_id: guildId } });
 	if (count > 0) return;
 
@@ -59,7 +69,6 @@ const tickerCommand: Command = {
 						.addChoices(
 							{ name: 'Stock', value: 'stock' },
 							{ name: 'Crypto', value: 'crypto' },
-							{ name: 'ETF', value: 'etf' },
 							{ name: 'Commodity', value: 'commodity' },
 						)),
 		)

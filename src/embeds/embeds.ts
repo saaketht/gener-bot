@@ -21,7 +21,5 @@ export {
 } from './utility-embeds';
 
 export {
-	getStockQuoteEmbed,
-	getCryptoEmbed,
-	getCommodityEmbed,
+	getAssetEmbed,
 } from './asset-embeds';

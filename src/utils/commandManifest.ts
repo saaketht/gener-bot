@@ -24,7 +24,7 @@ Message commands (type these in chat):
 - "flight <number>" — look up a flight
 - "pnl" — track P&L from CSV
 - "warframe <query>" — Warframe game data
-- "commodities" — commodity prices
+- "$<ticker>" — live price for any tracked asset (stocks, crypto, commodities)
 - "food <type>" — food/recipe lookup
 - "imagesearch <query>" — image search
 `.trim();

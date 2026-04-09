@@ -10,7 +10,7 @@ import { getAiResponseEmbed, getAiErrorEmbed } from '../../embeds/embeds';
 import { COMMAND_MANIFEST } from '../../utils/commandManifest';
 import { fetchUserContext, fetchUserProfile, updateUserProfile } from '../../utils/userContext';
 import { WatchedTickers, UserProfiles } from '../../models/dbObjects';
-import { getPrice } from '../../utils/priceApi';
+import { getAssetPrice, toAssetType } from '../../utils/priceApi';
 
 const grok = new OpenAI({
 	apiKey: process.env.GROK_API_KEY!,
@@ -39,7 +39,8 @@ Rules:
 - Call lookup_ticker FIRST before saying anything about any symbol or instrument. No exceptions.
 - For live data (price, volume, news, earnings), use web_search. Only state figures you retrieved — never invent numbers.
 - If lookup_ticker returns found: false, say the symbol isn't tracked and stop. Don't describe what it might be, don't call it a shitcoin, token, coin, or anything else.
-- 1-3 sentences. No markdown. No bullet points. Lowercase is fine.
+- Use newlines to separate distinct thoughts — no walls of text. Keep it concise but readable.
+- No markdown. No bullet points. Lowercase is fine.
 - Sharp and direct. Not your financial advisor — but don't repeat that disclaimer every time.
 - The first word of the user's message is their name. There is no need to start every message with it`;
 
@@ -109,140 +110,155 @@ function cacheResponse(messageIds: string[], fullText: string) {
 	}
 }
 
-const TOOLS: OpenAI.ChatCompletionTool[] = [
-	{
-		type: 'function',
-		function: {
-			name: 'lookup_ticker',
-			description: 'Look up whether a symbol is a tracked financial instrument (stock, crypto, commodity, ETF). Call this BEFORE discussing any financial instrument to verify it exists.',
-			parameters: {
-				type: 'object',
-				properties: {
-					symbol: { type: 'string', description: 'The ticker symbol to look up, e.g. AAPL, BTC, SPY' },
-				},
-				required: ['symbol'],
-			},
-		},
-	},
-	{
-		type: 'function',
-		function: {
-			name: 'lookup_user',
-			description: 'Look up another user\'s profile and personality notes. Use when someone asks about, mentions, or references another person in the server — by name or by @mention.',
-			parameters: {
-				type: 'object',
-				properties: {
-					user: { type: 'string', description: 'Username or Discord user ID (from <@id> mentions) to look up' },
-				},
-				required: ['user'],
-			},
-		},
-	},
-];
+// ── Tool definitions (canonical, converted to provider formats below) ──
 
-const CLAUDE_TOOLS: Anthropic.Messages.ToolUnion[] = [
-	{
-		type: 'web_search_20250305',
-		name: 'web_search',
-		max_uses: 3,
-	},
-	{
-		name: 'get_price',
-		description: 'Get the current price and basic quote data for a stock, ETF, or crypto symbol. Use this for any question about current price, daily change, high/low, or price action. Prefer this over web_search for price data.',
-		input_schema: {
-			type: 'object' as const,
-			properties: {
-				symbol: { type: 'string', description: 'Ticker symbol, e.g. AAPL, BTC, SPY' },
-			},
-			required: ['symbol'],
-		},
-	},
+interface ToolDef {
+	name: string;
+	description: string;
+	parameters: Record<string, unknown>;
+}
+
+const SHARED_TOOLS: ToolDef[] = [
 	{
 		name: 'lookup_ticker',
-		description: 'Look up whether a symbol is a tracked financial instrument (stock, crypto, commodity, ETF). Always call this before stating anything about a financial instrument.',
-		input_schema: {
-			type: 'object' as const,
-			properties: {
-				symbol: { type: 'string', description: 'The ticker symbol to look up, e.g. AAPL, BTC, SPY' },
-			},
+		description: 'Look up whether a symbol is a tracked financial instrument (stock, crypto, or commodity). Call this BEFORE discussing any financial instrument to verify it exists.',
+		parameters: {
+			type: 'object',
+			properties: { symbol: { type: 'string', description: 'Ticker symbol, e.g. AAPL, BTC, SPY' } },
 			required: ['symbol'],
 		},
 	},
 	{
 		name: 'lookup_user',
 		description: 'Look up another user\'s profile and personality notes. Use when someone asks about, mentions, or references another person in the server — by name or by @mention.',
-		input_schema: {
-			type: 'object' as const,
-			properties: {
-				user: { type: 'string', description: 'Username or Discord user ID (from <@id> mentions) to look up' },
-			},
+		parameters: {
+			type: 'object',
+			properties: { user: { type: 'string', description: 'Username or Discord user ID (from <@id> mentions) to look up' } },
 			required: ['user'],
 		},
 	},
 ];
 
-async function lookupTicker(symbol: string, guildId: string | null): Promise<string> {
-	if (!guildId) return JSON.stringify({ found: false, message: 'not a known financial instrument' });
-
-	const ticker: any = await WatchedTickers.findOne({
-		where: {
-			symbol: symbol.toUpperCase(),
-			guild_id: guildId,
+const CLAUDE_ONLY_TOOLS: ToolDef[] = [
+	{
+		name: 'get_price',
+		description: 'Get current price data for a tracked symbol. Prefer this over web_search for price data. Always call lookup_ticker first — use the returned type to inform this call.',
+		parameters: {
+			type: 'object',
+			properties: { symbol: { type: 'string', description: 'Ticker symbol, e.g. AAPL, BTC, SPY' } },
+			required: ['symbol'],
 		},
-	});
+	},
+];
 
-	if (ticker) {
-		return JSON.stringify({
-			found: true,
-			symbol: ticker.symbol,
-			name: ticker.name,
-			type: ticker.type,
-		});
-	}
+// OpenAI/Grok format
+const TOOLS: OpenAI.ChatCompletionTool[] = SHARED_TOOLS.map(t => ({
+	type: 'function' as const,
+	function: { name: t.name, description: t.description, parameters: t.parameters },
+}));
 
-	return JSON.stringify({ found: false, message: `${symbol.toUpperCase()} is not a known tracked instrument` });
+// Anthropic/Claude format (+ server-side web_search)
+const CLAUDE_TOOLS: Anthropic.Messages.ToolUnion[] = [
+	{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 },
+	...[...CLAUDE_ONLY_TOOLS, ...SHARED_TOOLS].map(t => ({
+		name: t.name,
+		description: t.description,
+		input_schema: t.parameters as Anthropic.Messages.Tool['input_schema'],
+	})),
+];
+
+// ── Tool handlers ──
+
+// Cache ticker lookups within a single tool-use session to avoid redundant DB hits
+// (lookup_ticker runs first, get_price re-uses the same row)
+type TickerCache = Map<string, { symbol: string; name: string | null; type: string } | null>;
+
+interface ToolContext {
+	guildId: string | null;
+	message: Message;
+	tickerCache: TickerCache;
 }
 
-async function lookupUser(userQuery: string, message: Message): Promise<string> {
-	// Strip <@> mention syntax to get raw ID
-	const idMatch = userQuery.match(/^<?@?(\d{17,20})>?$/);
-	let profile: any = null;
-
-	if (idMatch) {
-		// Direct ID lookup
-		profile = await UserProfiles.findOne({ where: { user_id: idMatch[1] } });
+async function resolveTicker(symbol: string, guildId: string | null, cache: TickerCache): Promise<{ symbol: string; name: string | null; type: string } | null> {
+	const key = symbol.toUpperCase();
+	if (cache.has(key)) return cache.get(key)!;
+	if (!guildId) {
+		cache.set(key, null);
+		return null;
 	}
-	else {
-		// Search by stored username first (case-insensitive)
-		const allProfiles: any[] = await UserProfiles.findAll();
-		profile = allProfiles.find(
-			p => p.username && p.username.toLowerCase() === userQuery.toLowerCase(),
-		);
+	const ticker: any = await WatchedTickers.findOne({
+		where: { symbol: key, guild_id: guildId },
+	});
+	const result = ticker ? { symbol: ticker.symbol, name: ticker.name, type: ticker.type } : null;
+	cache.set(key, result);
+	return result;
+}
 
-		// Fallback to Discord API if not found in DB
-		if (!profile && message.guild) {
-			const members = await message.guild.members.fetch({ query: userQuery, limit: 1 });
-			const member = members.first();
-			if (member) {
-				profile = await UserProfiles.findOne({ where: { user_id: member.id } });
+type ToolHandler = (input: Record<string, any>, ctx: ToolContext) => Promise<string>;
+
+const toolHandlers: Record<string, ToolHandler> = {
+	async lookup_ticker(input, ctx) {
+		const sym = input.symbol;
+		if (!sym || typeof sym !== 'string') return JSON.stringify({ error: 'missing or invalid symbol' });
+		const ticker = await resolveTicker(sym, ctx.guildId, ctx.tickerCache);
+		if (ticker) return JSON.stringify({ found: true, ...ticker });
+		return JSON.stringify({ found: false, message: `${sym.toUpperCase()} is not a known tracked instrument` });
+	},
+
+	async get_price(input, ctx) {
+		const sym = input.symbol;
+		if (!sym || typeof sym !== 'string') return JSON.stringify({ error: 'missing or invalid symbol' });
+		const ticker = await resolveTicker(sym, ctx.guildId, ctx.tickerCache);
+		const type = toAssetType(ticker?.type ?? 'stock');
+		const priceData = await getAssetPrice(sym.toUpperCase(), type);
+		if (priceData) return JSON.stringify(priceData);
+		return JSON.stringify({ found: false, message: `no price data available for ${sym.toUpperCase()}` });
+	},
+
+	async lookup_user(input, ctx) {
+		const userQuery = input.user;
+		if (!userQuery || typeof userQuery !== 'string') return JSON.stringify({ error: 'missing or invalid user' });
+		const message = ctx.message;
+
+		// Strip <@> mention syntax to get raw ID
+		const idMatch = userQuery.match(/^<?@?(\d{17,20})>?$/);
+		let profile: any = null;
+
+		if (idMatch) {
+			profile = await UserProfiles.findOne({ where: { user_id: idMatch[1] } });
+		}
+		else {
+			const allProfiles: any[] = await UserProfiles.findAll();
+			profile = allProfiles.find(
+				p => p.username && p.username.toLowerCase() === userQuery.toLowerCase(),
+			);
+			if (!profile && message.guild) {
+				const members = await message.guild.members.fetch({ query: userQuery, limit: 1 });
+				const member = members.first();
+				if (member) {
+					profile = await UserProfiles.findOne({ where: { user_id: member.id } });
+				}
 			}
 		}
-	}
 
-	if (!profile) {
-		return JSON.stringify({ found: false, message: `no user found matching "${userQuery}"` });
-	}
+		if (!profile) return JSON.stringify({ found: false, message: `no user found matching "${userQuery}"` });
+		if (!profile.notes) return JSON.stringify({ found: true, user_id: profile.user_id, username: profile.username, notes: null, message: 'no profile notes yet for this user' });
+		return JSON.stringify({ found: true, user_id: profile.user_id, username: profile.username, notes: profile.notes });
+	},
+};
 
-	if (!profile.notes) {
-		return JSON.stringify({ found: true, user_id: profile.user_id, username: profile.username, notes: null, message: 'no profile notes yet for this user' });
+async function executeTool(name: string, input: Record<string, any>, ctx: ToolContext): Promise<string | null> {
+	const handler = toolHandlers[name];
+	if (!handler) return null;
+	try {
+		const result = await handler(input, ctx);
+		logger.info(`${name}(${JSON.stringify(input)}) → ${result.substring(0, 200)}`);
+		return result;
 	}
-
-	return JSON.stringify({
-		found: true,
-		user_id: profile.user_id,
-		username: profile.username,
-		notes: profile.notes,
-	});
+	catch (err) {
+		logger.error(`tool ${name} threw:`, err);
+		return JSON.stringify({ error: `${name} failed: ${err instanceof Error ? err.message : 'unknown error'}` });
+	}
 }
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/jpg'];
@@ -353,6 +369,8 @@ async function getClaudeFinancialResponse(
 		{ role: 'user', content: userText },
 	];
 
+	const ctx: ToolContext = { guildId, message, tickerCache: new Map() };
+
 	let response = await claude.messages.create({
 		model: CLAUDE_MODEL,
 		max_tokens: MAX_TOKENS,
@@ -374,35 +392,20 @@ async function getClaudeFinancialResponse(
 
 		anthropicMessages.push({ role: 'assistant', content: response.content });
 
+		const serverOnly = toolUseBlocks.every(b => !toolHandlers[b.name]);
+		if (serverOnly) {
+			logger.info(`claude round ${rounds}: only server-side tools (${toolUseBlocks.map(b => b.name).join(', ')}), continuing`);
+			break;
+		}
+
 		const toolResults: Anthropic.ToolResultBlockParam[] = [];
 		for (const toolUse of toolUseBlocks) {
-			let result: string;
-			if (toolUse.name === 'get_price') {
-				const sym = (toolUse.input as any).symbol as string;
-				const priceData = await getPrice(sym);
-				result = priceData
-					? JSON.stringify(priceData)
-					: JSON.stringify({ found: false, message: `no price data available for ${sym.toUpperCase()}` });
-				logger.info(`claude get_price(${sym}) → ${result}`);
-			}
-			else if (toolUse.name === 'lookup_ticker') {
-				result = await lookupTicker((toolUse.input as any).symbol, guildId);
-				logger.info(`claude lookup_ticker(${(toolUse.input as any).symbol}) → ${result}`);
-			}
-			else if (toolUse.name === 'lookup_user') {
-				result = await lookupUser((toolUse.input as any).user, message);
-				logger.info(`claude lookup_user(${(toolUse.input as any).user}) → ${result}`);
-			}
-			else {
-				// Unknown tool (e.g. server-side web_search) — Claude handles it itself, skip
-				continue;
-			}
+			const result = await executeTool(toolUse.name, toolUse.input as Record<string, any>, ctx);
+			if (result === null) continue;
 			toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: result });
 		}
 
-		// If only server-side tools were used, no client results to send back
 		if (toolResults.length === 0) break;
-
 		anthropicMessages.push({ role: 'user', content: toolResults });
 
 		response = await claude.messages.create({
@@ -414,6 +417,10 @@ async function getClaudeFinancialResponse(
 		});
 
 		if (signal.aborted) return '';
+	}
+
+	if (rounds >= MAX_TOOL_ROUNDS) {
+		logger.warn(`claude hit max tool rounds (${MAX_TOOL_ROUNDS})`);
 	}
 
 	const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === 'text');
@@ -537,6 +544,7 @@ const messageEvent: MessageEvent = {
 				}
 
 				const guildId = message.guildId;
+				const ctx: ToolContext = { guildId, message, tickerCache: new Map() };
 
 				let response = await grok.chat.completions.create({
 					model: MODEL,
@@ -547,27 +555,25 @@ const messageEvent: MessageEvent = {
 
 				if (abortController.signal.aborted) return;
 
-				// Handle tool calls — one round-trip max
-				const toolCalls = response.choices[0]?.message?.tool_calls;
-				if (toolCalls && toolCalls.length > 0) {
+				// Multi-round tool loop (up to 3 rounds for Grok)
+				const MAX_GROK_ROUNDS = 3;
+				let grokRounds = 0;
+				while (response.choices[0]?.message?.tool_calls && grokRounds < MAX_GROK_ROUNDS) {
+					grokRounds++;
+					const toolCalls = response.choices[0].message.tool_calls;
 					messages.push(response.choices[0].message as any);
 
 					for (const toolCall of toolCalls) {
-						const args = JSON.parse(toolCall.function.arguments);
-						let result: string;
-
-						if (toolCall.function.name === 'lookup_ticker') {
-							result = await lookupTicker(args.symbol, guildId);
-							logger.info(`lookup_ticker(${args.symbol}) → ${result}`);
+						let args: Record<string, any>;
+						try {
+							args = JSON.parse(toolCall.function.arguments);
 						}
-						else if (toolCall.function.name === 'lookup_user') {
-							result = await lookupUser(args.user, message);
-							logger.info(`lookup_user(${args.user}) → ${result}`);
+						catch {
+							logger.warn(`grok sent unparseable tool args for ${toolCall.function.name}: ${toolCall.function.arguments}`);
+							args = {};
 						}
-						else {
-							result = JSON.stringify({ error: 'unknown tool' });
-						}
-
+						const result = await executeTool(toolCall.function.name, args, ctx)
+							?? JSON.stringify({ error: `unknown tool: ${toolCall.function.name}` });
 						messages.push({
 							role: 'tool',
 							content: result,

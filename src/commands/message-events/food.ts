@@ -2,7 +2,7 @@ import { MessageEvent } from '../../types';
 import logger from '../../utils/logger';
 import { searchImage } from '../../utils/imageSearch';
 
-const foodCategories = ['biryani', 'burger', 'butter-chicken', 'dessert', 'dosa', 'idly', 'pasta', 'pizza', 'rice', 'samosa'];
+const foodCategories = ['biryani', 'burger', 'butter-chicken', 'dessert', 'dosa', 'idly', 'pasta', 'pizza', 'samosa'];
 
 const messageEvent: MessageEvent = {
 	name: 'food',

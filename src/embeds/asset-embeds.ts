@@ -1,161 +1,76 @@
 import { EmbedBuilder } from 'discord.js';
+import { PriceData, AssetType } from '../utils/priceApi';
 
-interface GlobalQuote {
-	'01. symbol': string;
-	'02. open': string;
-	'03. high': string;
-	'04. low': string;
-	'05. price': string;
-	'06. volume': string;
-	'07. latest trading day': string;
-	'08. previous close': string;
-	'09. change': string;
-	'10. change percent': string;
+function fmt(val: number, decimals = 2): string {
+	return val.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
-function fmt(val: string, decimals = 2): string {
-	return parseFloat(val).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+function fmtPrice(val: number): string {
+	if (val >= 1) return fmt(val, 2);
+	return val.toFixed(4);
 }
 
-function fmtVolume(val: string): string {
-	const n = parseInt(val);
-	if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(2) + 'B';
-	if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
-	if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
-	return n.toString();
-}
-
-export function getStockQuoteEmbed(quote: GlobalQuote): EmbedBuilder {
-	const price = parseFloat(quote['05. price']);
-	const change = parseFloat(quote['09. change']);
-	const changePct = parseFloat(quote['10. change percent']?.replace('%', ''));
-	const isUp = change >= 0;
-	const arrow = isUp ? '🟢 ▲' : '🔴 ▼';
-	const sign = isUp ? '+' : '';
-	const color = isUp ? 0x10B981 : 0xEF4444;
-	const high = parseFloat(quote['03. high']);
-	const low = parseFloat(quote['04. low']);
-	const range = high - low;
-
-	// Price position within day's range (for the bar)
-	const barLen = 12;
-	const rawPos = range > 0 ? Math.round(((price - low) / range) * (barLen - 1)) : Math.floor(barLen / 2);
-	const pos = Math.max(0, Math.min(barLen - 1, rawPos));
-	const bar = '░'.repeat(pos) + '█' + '░'.repeat(barLen - 1 - pos);
-
-	return new EmbedBuilder()
-		.setColor(color)
-		.setTitle(`${quote['01. symbol']}  ${arrow} $${fmt(quote['05. price'])}`)
-		.setDescription(
-			`${isUp ? '🟢' : '🔴'} ${sign}$${fmt(quote['09. change'])} (${sign}${changePct.toFixed(2)}%) from prev close`,
-		)
-		.addFields(
-			{ name: 'Open', value: `$${fmt(quote['02. open'])}`, inline: true },
-			{ name: 'Prev Close', value: `$${fmt(quote['08. previous close'])}`, inline: true },
-			{ name: 'Volume', value: fmtVolume(quote['06. volume']), inline: true },
-			{ name: 'High', value: `$${fmt(quote['03. high'])}`, inline: true },
-			{ name: 'Low', value: `$${fmt(quote['04. low'])}`, inline: true },
-			{ name: 'Range', value: `$${fmt(String(range))}`, inline: true },
-			{ name: `L $${fmt(quote['04. low'])}  →  H $${fmt(quote['03. high'])}`, value: `\`${bar}\``, inline: false },
-		)
-		.setFooter({ text: `${quote['07. latest trading day']}  •  Alpha Vantage` })
-		.setTimestamp();
-}
-
-interface CurrencyExchangeRate {
-	'1. From_Currency Code': string;
-	'2. From_Currency Name': string;
-	'3. To_Currency Code': string;
-	'4. To_Currency Name': string;
-	'5. Exchange Rate': string;
-	'6. Last Refreshed': string;
-	'7. Time Zone': string;
-	'8. Bid Price': string;
-	'9. Ask Price': string;
-}
-
-export function getCryptoEmbed(rate: CurrencyExchangeRate): EmbedBuilder {
-	const price = parseFloat(rate['5. Exchange Rate']);
-	const formatted = price > 1 ? fmt(String(price)) : price.toFixed(4);
-	const bid = parseFloat(rate['8. Bid Price']);
-	const ask = parseFloat(rate['9. Ask Price']);
-	const spread = ask - bid;
-	const name = rate['2. From_Currency Name'] ?? rate['1. From_Currency Code'];
-	const symbol = rate['1. From_Currency Code'];
-
-	return new EmbedBuilder()
-		.setColor(0xF7931A)
-		.setTitle(`${name} (${symbol})`)
-		.setDescription(`**$${formatted}** USD`)
-		.addFields(
-			{ name: 'Bid', value: `$${fmt(String(bid))}`, inline: true },
-			{ name: 'Ask', value: `$${fmt(String(ask))}`, inline: true },
-			{ name: 'Spread', value: `$${spread > 1 ? fmt(String(spread)) : spread.toFixed(4)}`, inline: true },
-		)
-		.setFooter({ text: `${rate['6. Last Refreshed']} ${rate['7. Time Zone']}  •  Alpha Vantage` })
-		.setTimestamp();
-}
-
-interface CommodityDataPoint {
-	date: string;
-	value: string;
-}
-
-interface CommodityResponse {
-	name: string;
-	unit: string;
-	data: CommodityDataPoint[];
-}
-
-const COMMODITY_COLORS: Record<string, number> = {
-	'WTI': 0x1E3A5F,
-	'BRENT': 0x2D4A6F,
-	'NATURAL_GAS': 0xF97316,
+const TYPE_COLORS: Record<AssetType, { up: number; down: number }> = {
+	stock: { up: 0x10B981, down: 0xEF4444 },
+	crypto: { up: 0xF7931A, down: 0xF7931A },
+	commodity: { up: 0x1E3A5F, down: 0x1E3A5F },
 };
 
-export function getCommodityEmbed(func: string, response: CommodityResponse): EmbedBuilder {
-	const recent = response.data.filter(d => d.value !== '.').slice(0, 5);
-	if (!recent.length) {
-		return new EmbedBuilder()
-			.setColor(0x6B7280)
-			.setTitle(response.name)
-			.setDescription('No recent data available.');
+export function getAssetEmbed(price: PriceData, type: AssetType, displayName?: string): EmbedBuilder {
+	const isUp = price.change_pct >= 0;
+	const arrow = isUp ? '🟢 ▲' : '🔴 ▼';
+	const sign = isUp ? '+' : '';
+	const color = isUp ? TYPE_COLORS[type].up : TYPE_COLORS[type].down;
+	const range = price.high - price.low;
+	const change = price.price - price.prev_close;
+
+	// Price position bar helper
+	const barLen = 12;
+	function priceBar(low: number, high: number, current: number): string {
+		const span = high - low;
+		const rawPos = span > 0 ? Math.round(((current - low) / span) * (barLen - 1)) : Math.floor(barLen / 2);
+		const pos = Math.max(0, Math.min(barLen - 1, rawPos));
+		return '░'.repeat(pos) + '█' + '░'.repeat(barLen - 1 - pos);
 	}
 
-	const latest = recent[0];
-	const price = parseFloat(latest.value);
-	const color = COMMODITY_COLORS[func] ?? 0x6B7280;
-
-	// Calculate change from previous day if available
-	let changeStr = '';
-	if (recent.length >= 2) {
-		const prev = parseFloat(recent[1].value);
-		const change = price - prev;
-		const changePct = (change / prev) * 100;
-		const sign = change >= 0 ? '+' : '';
-		const indicator = change >= 0 ? '🟢' : '🔴';
-		changeStr = `${indicator} ${sign}$${change.toFixed(2)} (${sign}${changePct.toFixed(2)}%)`;
-	}
+	const titleName = displayName ? `${displayName} (${price.symbol})` : price.symbol;
 
 	const embed = new EmbedBuilder()
 		.setColor(color)
-		.setTitle(`${response.name}  —  $${fmt(String(price))}`)
-		.setFooter({ text: `${latest.date}  •  ${response.unit}  •  Alpha Vantage` })
-		.setTimestamp();
+		.setTitle(`${titleName}  ${arrow} $${fmtPrice(price.price)}`)
+		.setDescription(
+			`${isUp ? '🟢' : '🔴'} ${sign}$${fmtPrice(Math.abs(change))} (${sign}${price.change_pct.toFixed(2)}%) from prev close`,
+		)
+		.addFields(
+			{ name: 'Prev Close', value: `$${fmtPrice(price.prev_close)}`, inline: true },
+			{ name: 'High', value: `$${fmtPrice(price.high)}`, inline: true },
+			{ name: 'Low', value: `$${fmtPrice(price.low)}`, inline: true },
+		);
 
-	if (changeStr) {
-		embed.setDescription(changeStr + ' from previous day');
+	if (range > 0) {
+		embed.addFields({
+			name: `L $${fmtPrice(price.low)}  →  H $${fmtPrice(price.high)}`,
+			value: `\`${priceBar(price.low, price.high, price.price)}\``,
+			inline: false,
+		});
 	}
 
-	// Show last 5 days
-	if (recent.length >= 3) {
-		const history = recent
-			.slice(0, 5)
-			.reverse()
-			.map(d => `${d.date.slice(5)}: $${fmt(d.value)}`)
-			.join('\n');
-		embed.addFields({ name: 'Recent', value: `\`\`\`\n${history}\n\`\`\``, inline: false });
+	if (price.week52_high && price.week52_low) {
+		embed.addFields(
+			{ name: '52wk Low', value: `$${fmtPrice(price.week52_low)}`, inline: true },
+			{ name: '52wk High', value: `$${fmtPrice(price.week52_high)}`, inline: true },
+			{ name: '\u200b', value: '\u200b', inline: true },
+		);
+		const w52range = price.week52_high - price.week52_low;
+		if (w52range > 0) {
+			embed.addFields({
+				name: `52wk  $${fmtPrice(price.week52_low)}  →  $${fmtPrice(price.week52_high)}`,
+				value: `\`${priceBar(price.week52_low, price.week52_high, price.price)}\``,
+				inline: false,
+			});
+		}
 	}
 
+	embed.setFooter({ text: `${type}  •  ${price.source}` }).setTimestamp();
 	return embed;
 }
