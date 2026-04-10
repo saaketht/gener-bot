@@ -78,7 +78,13 @@ async function fetchYahoo(symbol: string): Promise<PriceData | null> {
 }
 
 export async function getPrice(symbol: string): Promise<PriceData | null> {
-	return await fetchFinnhub(symbol) ?? await fetchYahoo(symbol);
+	const [finnhub, yahoo] = await Promise.all([fetchFinnhub(symbol), fetchYahoo(symbol)]);
+	if (!finnhub) return yahoo;
+	if (yahoo) {
+		finnhub.week52_high = yahoo.week52_high;
+		finnhub.week52_low = yahoo.week52_low;
+	}
+	return finnhub;
 }
 
 export type AssetType = 'stock' | 'crypto' | 'commodity';
