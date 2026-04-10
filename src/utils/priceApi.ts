@@ -2,6 +2,7 @@ import logger from './logger';
 
 export interface PriceData {
 	symbol: string;
+	query_symbol?: string;
 	price: number;
 	change_pct: number;
 	high: number;
@@ -113,6 +114,6 @@ export async function getAssetPrice(symbol: string, type: AssetType): Promise<Pr
 	const normalized = normalizeSymbol(symbol, type);
 	const data = await getPrice(normalized);
 	if (!data) return null;
-	// Stamp the original (un-normalized) symbol back so embeds show "BTC" not "BTC-USD".
-	return { ...data, symbol: symbol.toUpperCase() };
+	// Stamp the original symbol for display ("BTC") and keep the normalized one for URLs ("BTC-USD").
+	return { ...data, symbol: symbol.toUpperCase(), query_symbol: normalized };
 }

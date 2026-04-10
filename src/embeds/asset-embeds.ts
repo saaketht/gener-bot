@@ -35,9 +35,13 @@ export function getAssetEmbed(price: PriceData, type: AssetType, displayName?: s
 
 	const titleName = displayName ? `${displayName} (${price.symbol})` : price.symbol;
 
+	const yahooSymbol = price.query_symbol ?? price.symbol;
+	const yahooUrl = `https://finance.yahoo.com/quote/${encodeURIComponent(yahooSymbol)}`;
+
 	const embed = new EmbedBuilder()
 		.setColor(color)
 		.setTitle(`${titleName}  ${arrow} $${fmtPrice(price.price)}`)
+		.setURL(yahooUrl)
 		.setDescription(
 			`${isUp ? '🟢' : '🔴'} ${sign}$${fmtPrice(Math.abs(change))} (${sign}${price.change_pct.toFixed(2)}%) from prev close`,
 		)
