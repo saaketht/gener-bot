@@ -74,13 +74,13 @@ export function formatDateHuman(dateStr: string): string {
 	return `${DAYS[date.getDay()]}, ${MONTHS[date.getMonth()]} ${d} ${y}`;
 }
 
-function fmtDollars(n: number): string {
+export function fmtDollars(n: number): string {
 	const abs = Math.abs(n);
 	const formatted = abs.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 	return n < 0 ? `-$${formatted}` : `$${formatted}`;
 }
 
-function fmtPct(n: number): string {
+export function fmtPct(n: number): string {
 	return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
 }
 
@@ -249,10 +249,14 @@ export function getPnlEmbed(trades: Trade[], dateStr: string, detailed = false):
 		.setTimestamp();
 }
 
-export function getNoTradesEmbed(dateStr: string): EmbedBuilder {
-	return new EmbedBuilder()
+export function getNoTradesEmbed(dateStr: string, recapBlock?: string): EmbedBuilder {
+	const embed = new EmbedBuilder()
 		.setColor(0x6B7280)
 		.setTitle(`📊 SPY 0DTE — ${dateStr}`)
 		.setDescription(`${formatDateHuman(dateStr)}\n\nNo trades found for this date.`)
 		.setTimestamp();
+	if (recapBlock) {
+		embed.addFields({ name: 'RECENT', value: recapBlock, inline: false });
+	}
+	return embed;
 }

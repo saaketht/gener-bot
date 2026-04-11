@@ -11,6 +11,7 @@ import {
 	getPnlEmbed,
 	getNoTradesEmbed,
 } from '../../embeds/pnl-embeds';
+import { getUniqueTradingDays, getDaySummary, buildRecapBlock } from '../../embeds/recap-embeds';
 
 const CSV_PATH = process.env.PNL_CSV_PATH
 	|| join(homedir(), 'rh-trade-exporter', 'outputs', 'spy_trades.csv');
@@ -46,7 +47,16 @@ const messageEvent: MessageEvent = {
 			);
 
 			if (dayTrades.length === 0) {
-				await message.reply({ embeds: [getNoTradesEmbed(requestedDate)] });
+				let recapBlock: string | undefined;
+				const recentDays = getUniqueTradingDays(allTrades).slice(0, 5);
+				if (recentDays.length > 0) {
+					const summaries = recentDays.map(date => {
+						const dt = allTrades.filter(t => normalizeDate(t.date) === date);
+						return getDaySummary(dt);
+					});
+					recapBlock = buildRecapBlock(summaries);
+				}
+				await message.reply({ embeds: [getNoTradesEmbed(requestedDate, recapBlock)] });
 				return;
 			}
 

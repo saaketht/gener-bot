@@ -73,8 +73,7 @@ export class FlightTracker {
 
 			const data = await fetchFlightStatus(row.flight_number, row.flight_date);
 			if (!data) {
-				// transient failure — skip this cycle
-				logger.warn(`Flight API returned null for ${row.flight_number}, skipping poll`);
+				logger.warn(`Poll: ${row.flight_number} (row=${dbRowId}) — API returned null, skipping cycle`);
 				return;
 			}
 
@@ -114,6 +113,7 @@ export class FlightTracker {
 
 			// map API status to our simplified status
 			const newStatus = mapStatus(data.status);
+			const oldStatus = row.status;
 
 			// update DB
 			await row.update({
@@ -121,8 +121,13 @@ export class FlightTracker {
 				last_api_data: JSON.stringify(data),
 			});
 
+			if (newStatus !== oldStatus) {
+				logger.info(`Poll: ${row.flight_number} (row=${dbRowId}) status ${oldStatus} → ${newStatus}`);
+			}
+
 			// if flight is done, deactivate
 			if (newStatus === 'landed' || newStatus === 'cancelled') {
+				logger.info(`Poll: ${row.flight_number} (row=${dbRowId}) finished (${newStatus}), deactivating`);
 				await row.update({ active: false });
 				this.stopTracking(dbRowId);
 				return;
@@ -138,7 +143,7 @@ export class FlightTracker {
 			}
 		}
 		catch (error) {
-			logger.error(`Error polling flight ${dbRowId}`, { error });
+			logger.error(`Poll: error for row=${dbRowId}`, { error });
 		}
 	}
 

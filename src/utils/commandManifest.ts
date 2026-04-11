@@ -23,6 +23,8 @@ Message commands (type these in chat):
 - "weather <city>" — get weather
 - "flight <number>" — look up a flight
 - "pnl" — track P&L from CSV
+- "recap" — 5-day trading recap
+- "recap all" — all-time P/L overview
 - "warframe <query>" — Warframe game data
 - "$<ticker>" — live price for any tracked asset (stocks, crypto, commodities)
 - "food <type>" — food/recipe lookup

@@ -7,11 +7,11 @@ export async function fetchFlightStatus(flightNumber: string, date: string): Pro
 	if (fa) return fa;
 
 	// fallback to AeroDataBox for schedule data further out
-	logger.info(`FlightAware returned no results for ${flightNumber} on ${date}, trying AeroDataBox`);
 	return fetchAeroDataBox(flightNumber, date);
 }
 
 async function fetchFlightAware(flightNumber: string, date: string): Promise<FlightData | null> {
+	const t0 = Date.now();
 	try {
 		const start = `${date}T00:00:00Z`;
 		const end = `${date}T23:59:59Z`;
@@ -23,24 +23,28 @@ async function fetchFlightAware(flightNumber: string, date: string): Promise<Fli
 			headers: {
 				'x-apikey': process.env.FLIGHTAWARE_API_KEY!,
 			},
+			signal: AbortSignal.timeout(10_000),
 		});
 
 		if (!response.ok) throw new Error(`FlightAware returned ${response.status}`);
 		const body = await response.json();
 		const flights = body.flights;
 		if (!Array.isArray(flights) || flights.length === 0) {
+			logger.info(`FlightAware: no results for ${flightNumber} on ${date} (${Date.now() - t0}ms)`);
 			return null;
 		}
 
+		logger.info(`FlightAware: found ${flightNumber} on ${date}, status=${flights[0].status ?? 'unknown'} (${Date.now() - t0}ms)`);
 		return normalizeFlightAware(flights[0]);
 	}
 	catch (error) {
-		logger.error('FlightAware fetch failed', { flightNumber, date, error });
+		logger.error(`FlightAware: failed for ${flightNumber} on ${date} (${Date.now() - t0}ms)`, { error });
 		return null;
 	}
 }
 
 async function fetchAeroDataBox(flightNumber: string, date: string): Promise<FlightData | null> {
+	const t0 = Date.now();
 	try {
 		const url = new URL(`https://aerodatabox.p.rapidapi.com/flights/number/${flightNumber}/${date}`);
 		url.searchParams.set('withAircraftImage', 'false');
@@ -51,18 +55,21 @@ async function fetchAeroDataBox(flightNumber: string, date: string): Promise<Fli
 				'x-rapidapi-key': process.env.rapidApiKey!,
 				'x-rapidapi-host': 'aerodatabox.p.rapidapi.com',
 			},
+			signal: AbortSignal.timeout(10_000),
 		});
 
 		if (!response.ok) throw new Error(`AeroDataBox returned ${response.status}`);
 		const flights = await response.json();
 		if (!Array.isArray(flights) || flights.length === 0) {
+			logger.info(`AeroDataBox: no results for ${flightNumber} on ${date} (${Date.now() - t0}ms)`);
 			return null;
 		}
 
+		logger.info(`AeroDataBox: found ${flightNumber} on ${date}, status=${flights[0].status ?? 'unknown'} (${Date.now() - t0}ms)`);
 		return normalizeAeroDataBox(flights[0]);
 	}
 	catch (error) {
-		logger.error('AeroDataBox fetch failed', { flightNumber, date, error });
+		logger.error(`AeroDataBox: failed for ${flightNumber} on ${date} (${Date.now() - t0}ms)`, { error });
 		return null;
 	}
 }

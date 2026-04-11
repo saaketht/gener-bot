@@ -1,4 +1,4 @@
-import { SlashCommandBuilder } from 'discord.js';
+import { MessageFlags, SlashCommandBuilder } from 'discord.js';
 import { Command, DiscordClient } from '../../types';
 import { GameEngine } from '../../game/GameEngine';
 import { GameStorage } from '../../game/GameStorage';
@@ -17,13 +17,13 @@ const adventureCommand: Command = {
 
 	async execute(client, interaction) {
 		if (!interaction.channel) {
-			await interaction.reply({ content: 'Cannot start adventure here.', ephemeral: true });
+			await interaction.reply({ content: 'Cannot start adventure here.', flags: MessageFlags.Ephemeral });
 			return;
 		}
 
 		// Check if we can create a thread
 		if (!('threads' in interaction.channel)) {
-			await interaction.reply({ content: 'Adventures can only be started in text channels.', ephemeral: true });
+			await interaction.reply({ content: 'Adventures can only be started in text channels.', flags: MessageFlags.Ephemeral });
 			return;
 		}
 

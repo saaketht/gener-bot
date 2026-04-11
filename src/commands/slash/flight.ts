@@ -1,10 +1,11 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
+import { ChatInputCommandInteraction, MessageFlags, SlashCommandBuilder } from 'discord.js';
 import { Command, DiscordClient } from '../../types';
 import { TrackedFlights } from '../../models/dbObjects';
 import { fetchFlightStatus } from '../../utils/flightApi';
 import { getFlightTrackingEmbed, getFlightListEmbed, getFlightErrorEmbed } from '../../embeds/flight-embeds';
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { Op } from 'sequelize';
+import logger from '../../utils/logger';
 
 const MAX_TRACKED_PER_USER = 5;
 
@@ -54,7 +55,7 @@ async function handleTrack(client: DiscordClient, interaction: ChatInputCommandI
 	if (!/^[A-Z0-9]{2}\d{1,4}$/.test(flightNumber)) {
 		await interaction.reply({
 			embeds: [getFlightErrorEmbed('Invalid flight number format. Use airline code + number, e.g. `NK220`, `AA100`.')],
-			ephemeral: true,
+			flags: MessageFlags.Ephemeral,
 		});
 		return;
 	}
@@ -73,7 +74,7 @@ async function handleTrack(client: DiscordClient, interaction: ChatInputCommandI
 	if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
 		await interaction.reply({
 			embeds: [getFlightErrorEmbed('Invalid date format. Use `YYYY-MM-DD`.')],
-			ephemeral: true,
+			flags: MessageFlags.Ephemeral,
 		});
 		return;
 	}
@@ -118,6 +119,7 @@ async function handleTrack(client: DiscordClient, interaction: ChatInputCommandI
 		const yesterday = new Date();
 		yesterday.setDate(yesterday.getDate() - 1);
 		const yesterdayStr = yesterday.toISOString().split('T')[0];
+		logger.info(`Flight track: ${flightNumber} not found on ${date}, trying yesterday (${yesterdayStr})`);
 		data = await fetchFlightStatus(flightNumber, yesterdayStr);
 		if (data) {
 			date = yesterdayStr;
@@ -125,6 +127,7 @@ async function handleTrack(client: DiscordClient, interaction: ChatInputCommandI
 	}
 
 	if (!data) {
+		logger.info(`Flight track: ${flightNumber} not found on any date, user=${interaction.user.id}`);
 		await interaction.editReply({
 			embeds: [getFlightErrorEmbed(`Could not find flight **${flightNumber}** on ${date}. Check the flight number and date.`)],
 		});
@@ -158,6 +161,8 @@ async function handleTrack(client: DiscordClient, interaction: ChatInputCommandI
 		expires_at: expiresAt,
 	}) as any;
 
+	logger.info(`Flight tracked: ${flightNumber} on ${date}, status=${data.status}, row=${row.id}, user=${interaction.user.id}, guild=${interaction.guildId}`);
+
 	// update the button with the actual DB row ID
 	const realButton = new ButtonBuilder()
 		.setCustomId(`flight_refresh_${row.id}`)
@@ -188,7 +193,7 @@ async function handleList(interaction: ChatInputCommandInteraction) {
 	if (flights.length === 0) {
 		await interaction.reply({
 			content: 'You\'re not tracking any flights. Use `/flight track` to start.',
-			ephemeral: true,
+			flags: MessageFlags.Ephemeral,
 		});
 		return;
 	}
@@ -220,7 +225,7 @@ async function handleRemove(client: DiscordClient, interaction: ChatInputCommand
 	if (!row) {
 		await interaction.reply({
 			content: `No active tracking found for **${input}**. Use \`/flight list\` to see your flights.`,
-			ephemeral: true,
+			flags: MessageFlags.Ephemeral,
 		});
 		return;
 	}
@@ -230,9 +235,10 @@ async function handleRemove(client: DiscordClient, interaction: ChatInputCommand
 		client.flightTracker.stopTracking(row.id);
 	}
 
+	logger.info(`Flight removed: ${row.flight_number} on ${row.flight_date}, row=${row.id}, user=${interaction.user.id}`);
 	await interaction.reply({
 		content: `Stopped tracking **${row.flight_number}** on ${row.flight_date}.`,
-		ephemeral: true,
+		flags: MessageFlags.Ephemeral,
 	});
 }
 

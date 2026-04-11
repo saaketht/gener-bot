@@ -27,6 +27,7 @@ declare global {
             PORT: string;
             LOG_LEVEL: string;
             PNL_CSV_PATH: string;
+            CASH_FLOW_SCRIPT_PATH: string;
         }
     }
 }

@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 import { Command } from '../../types';
 import { Users } from '../../models/dbObjects';
 import logger from '../../utils/logger';
@@ -36,7 +36,7 @@ const balanceCommand: Command = {
 			logger.error('Balance command error:', error);
 			await interaction.reply({
 				content: 'Failed to check balance. Try again later.',
-				ephemeral: true,
+				flags: MessageFlags.Ephemeral,
 			});
 		}
 	},

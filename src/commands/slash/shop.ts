@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 import { Command } from '../../types';
 import { CurrencyShop, Users } from '../../models/dbObjects';
 import logger from '../../utils/logger';
@@ -48,7 +48,7 @@ const shopCommand: Command = {
 			if (!item) {
 				await interaction.reply({
 					content: `Item "${itemName}" not found in shop.`,
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 				return;
 			}
@@ -69,7 +69,7 @@ const shopCommand: Command = {
 					.setDescription(`You need **${cost}** coins but only have **${balance}**.`)
 					.setTimestamp();
 
-				await interaction.reply({ embeds: [embed], ephemeral: true });
+				await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 				return;
 			}
 
@@ -94,7 +94,7 @@ const shopCommand: Command = {
 			logger.error('Shop command error:', error);
 			await interaction.reply({
 				content: 'Failed to access shop. Try again later.',
-				ephemeral: true,
+				flags: MessageFlags.Ephemeral,
 			});
 		}
 	},

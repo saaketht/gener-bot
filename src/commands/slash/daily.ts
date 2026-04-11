@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 import { Command } from '../../types';
 import { Users } from '../../models/dbObjects';
 import logger from '../../utils/logger';
@@ -38,7 +38,7 @@ const dailyCommand: Command = {
 						.setDescription(`You already claimed your daily!\nCome back in **${hours}h ${minutes}m**.`)
 						.setTimestamp();
 
-					await interaction.reply({ embeds: [embed], ephemeral: true });
+					await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 					return;
 				}
 			}
@@ -67,7 +67,7 @@ const dailyCommand: Command = {
 			logger.error('Daily command error:', error);
 			await interaction.reply({
 				content: 'Failed to claim daily. Try again later.',
-				ephemeral: true,
+				flags: MessageFlags.Ephemeral,
 			});
 		}
 	},
