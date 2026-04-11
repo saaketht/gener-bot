@@ -89,7 +89,7 @@ readEvents().then((events) => {
 	console.log(`Loaded ${events.length} passive events.`);
 });
 
-// log port and print to web dyno port cause why not?
+// log port and print to http port cause why not?
 const PORT = process.env.PORT || 6776;
 http.createServer(function(req, res) {
 	res.writeHead(200, { 'Content-Type': 'text/plain' });

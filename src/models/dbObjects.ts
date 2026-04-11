@@ -23,7 +23,10 @@ const TrackedFlights = trackedFlights(sequelize);
 const UserProfiles = userProfiles(sequelize);
 const WatchedTickers = watchedTickers(sequelize);
 // auto-create missing tables and add new columns to existing tables at startup
-sequelize.sync({ alter: true });
+sequelize.sync({ alter: true }).then(() => {
+	// One-shot migration: collapse legacy 'etf' rows into 'stock' (idempotent).
+	WatchedTickers.update({ type: 'stock' }, { where: { type: 'etf' } });
+});
 
 UserItems.belongsTo(CurrencyShop, { foreignKey: 'item_id', as: 'item' });
 
