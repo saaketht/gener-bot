@@ -1,7 +1,6 @@
-import { execFile } from 'child_process';
 import { readFile } from 'fs/promises';
 import { homedir } from 'os';
-import { dirname, join } from 'path';
+import { join } from 'path';
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, Message } from 'discord.js';
 import { MessageEvent } from '../../types';
 import logger from '../../utils/logger';
@@ -11,20 +10,13 @@ import {
 	getRecapEmbed,
 	parseCashFlowJson,
 	getCashFlowEmbed,
-	CashFlowSummary,
 } from '../../embeds/recap-embeds';
 
 const CSV_PATH = process.env.PNL_CSV_PATH
 	|| join(homedir(), 'rh-trade-exporter', 'outputs', 'spy_trades.csv');
 
-const CASH_FLOW_SCRIPT = process.env.CASH_FLOW_SCRIPT_PATH
-	|| (process.env.NODE_ENV === 'prod'
-		? '/home/gener/rh-trade-exporter/cash_flow.py'
-		: join(homedir(), 'rh-trade-exporter', 'cash_flow.py'));
-
-// In-memory cache for cash flow data (30 min TTL)
-let cashFlowCache: { data: CashFlowSummary; ts: number } | null = null;
-const CACHE_TTL = 30 * 60 * 1000;
+const CASH_FLOW_PATH = process.env.CASH_FLOW_JSONL_PATH
+	|| join(homedir(), 'rh-trade-exporter', 'outputs', 'cash_flow.jsonl');
 
 function detailButton(dayCount: number): ActionRowBuilder<ButtonBuilder> {
 	return new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -33,25 +25,6 @@ function detailButton(dayCount: number): ActionRowBuilder<ButtonBuilder> {
 			.setLabel('Show details')
 			.setStyle(ButtonStyle.Secondary),
 	);
-}
-
-function runCashFlow(): Promise<string> {
-	const venvPython = join(dirname(CASH_FLOW_SCRIPT), '.venv', 'bin', 'python3');
-	return new Promise((resolve, reject) => {
-		execFile(venvPython, [CASH_FLOW_SCRIPT, '--json'], { timeout: 30_000 }, (err, stdout, stderr) => {
-			if (err) {
-				const msg = stderr || stdout || err.message;
-				if (msg.includes('Token expired') || msg.includes('.rh_token')) {
-					reject(new Error('Robinhood token expired — run `hood.py --save-token` to refresh.'));
-				}
-				else {
-					reject(new Error(msg));
-				}
-				return;
-			}
-			resolve(stdout);
-		});
-	});
 }
 
 async function handleRecap(message: Message, dayCount: number) {
@@ -82,20 +55,23 @@ async function handleCashFlow(message: Message) {
 	try {
 		if ('sendTyping' in message.channel) await message.channel.sendTyping();
 
-		if (cashFlowCache && Date.now() - cashFlowCache.ts < CACHE_TTL) {
-			await message.reply({ embeds: [getCashFlowEmbed(cashFlowCache.data)] });
+		const raw = await readFile(CASH_FLOW_PATH, 'utf-8');
+		const lines = raw.trim().split('\n').filter(Boolean);
+		if (lines.length === 0) {
+			await message.reply('No cash flow data yet — run `cash_flow.py --json` to generate.');
 			return;
 		}
 
-		const stdout = await runCashFlow();
-		const summary = parseCashFlowJson(stdout);
-		cashFlowCache = { data: summary, ts: Date.now() };
+		const lastLine = lines[lines.length - 1];
+		const summary = parseCashFlowJson(lastLine);
 
 		await message.reply({ embeds: [getCashFlowEmbed(summary)] });
 	}
 	catch (error) {
 		logger.error('recap all error:', error);
-		const msg = error instanceof Error ? error.message : 'Failed to fetch cash flow data.';
+		const msg = error instanceof Error && error.message.includes('ENOENT')
+			? 'No cash flow data found — run `cash_flow.py --json` to generate.'
+			: 'Failed to read cash flow data.';
 		await message.reply(msg);
 	}
 }
