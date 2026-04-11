@@ -75,6 +75,8 @@ const messageEvent: MessageEvent = {
 	async execute(message) {
 		if (message.author.bot) return;
 		if (!message.guildId) return;
+		// Skip if this is an AI query — ai-complete handles financial lookups itself
+		if (message.content.match(/^ai\s/i)) return;
 		const content = message.content;
 
 		if (content.toLowerCase().includes('crypto-api-info')) {
@@ -116,11 +118,14 @@ const messageEvent: MessageEvent = {
 		}
 		if (!resolved.length) return;
 
+		logger.info(`asset lookup: ${message.author.username} → [${resolved.map(r => `${r.symbol}${r.tracked ? '' : ' (untracked)'}`).join(', ')}]`);
+
 		try {
 			if ('sendTyping' in message.channel) await message.channel.sendTyping();
 			const results = await Promise.all(
 				resolved.map(async (r): Promise<{ resolved: ResolvedTicker; price: PriceData } | null> => {
 					const price = await fetchPrice(r);
+					if (!price) logger.warn(`asset fetch returned null for ${r.symbol} (${r.type})`);
 					return price ? { resolved: r, price } : null;
 				}),
 			);

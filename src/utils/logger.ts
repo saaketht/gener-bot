@@ -43,8 +43,14 @@ const logger = winston.createLogger({
 if (process.env.NODE_ENV !== 'prod') {
 	logger.add(new winston.transports.Console({
 		format: format.combine(
-			format.colorize(),
-			conciseErrorFormat,
+			format.timestamp({ format: 'HH:mm:ss' }),
+			format.errors({ stack: true }),
+			format.printf(({ level, message, timestamp, stack }) => {
+				let log = `${timestamp} [${level}]: ${message}`;
+				if (stack) log += `\n${String(stack).split('\n')[0]}`;
+				return log;
+			}),
+			format.colorize({ all: true }),
 		),
 	}));
 }
