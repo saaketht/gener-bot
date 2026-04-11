@@ -27,12 +27,6 @@ const DEFAULT_TICKERS = [
 ];
 
 async function ensureDefaults(guildId: string, userId: string) {
-	// One-shot migration: collapse legacy 'etf' rows into 'stock'.
-	await WatchedTickers.update(
-		{ type: 'stock' },
-		{ where: { guild_id: guildId, type: 'etf' } },
-	);
-
 	const count = await WatchedTickers.count({ where: { guild_id: guildId } });
 	if (count > 0) return;
 

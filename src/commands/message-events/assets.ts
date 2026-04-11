@@ -1,7 +1,7 @@
 import { MessageEvent } from '../../types';
 import logger from '../../utils/logger';
 import { getAssetEmbed } from '../../embeds/asset-embeds';
-import { getAssetPrice, toAssetType, PriceData } from '../../utils/priceApi';
+import { getAssetPrice, getPrice, toAssetType, PriceData, AssetType } from '../../utils/priceApi';
 import { WatchedTickers } from '../../models/dbObjects';
 
 const TICKER_RE = /\$([a-zA-Z][a-zA-Z0-9._-]{0,9})\b/g;
@@ -11,6 +11,13 @@ interface TickerRow {
 	symbol: string;
 	name: string | null;
 	type: string;
+}
+
+interface ResolvedTicker {
+	symbol: string;
+	name?: string;
+	type: AssetType;
+	tracked: boolean;
 }
 
 function levenshtein(a: string, b: string): number {
@@ -36,7 +43,9 @@ function findTicker(query: string, tickers: TickerRow[]): TickerRow | null {
 	const exact = tickers.find(t => t.symbol.toUpperCase() === q);
 	if (exact) return exact;
 
-	const threshold = q.length <= 4 ? 1 : 2;
+	// Exact-only for ≤3 chars (SPY≠SPX), 1 for 4-5, 2 for 6+
+	if (q.length <= 3) return null;
+	const threshold = q.length <= 5 ? 1 : 2;
 	let best: { row: TickerRow; dist: number } | null = null;
 	for (const t of tickers) {
 		const candidates = [t.symbol.toUpperCase()];
@@ -53,6 +62,12 @@ function findTicker(query: string, tickers: TickerRow[]): TickerRow | null {
 		}
 	}
 	return best?.row ?? null;
+}
+
+async function fetchPrice(resolved: ResolvedTicker): Promise<PriceData | null> {
+	if (resolved.tracked) return getAssetPrice(resolved.symbol, resolved.type);
+	// Untracked: try raw symbol (works for any stock/ETF on major exchanges)
+	return getPrice(resolved.symbol);
 }
 
 const messageEvent: MessageEvent = {
@@ -80,33 +95,38 @@ const messageEvent: MessageEvent = {
 				tokens.push(t);
 			}
 		}
+		if (tokens.length > MAX_RESULTS) tokens.length = MAX_RESULTS;
 
 		const tickers = (await WatchedTickers.findAll({
 			where: { guild_id: message.guildId },
 		})) as unknown as TickerRow[];
-		if (!tickers.length) return;
 
-		const resolved: TickerRow[] = [];
+		// Resolve each token: tracked ticker first, then raw lookup
+		const resolved: ResolvedTicker[] = [];
+		const seenSymbols = new Set<string>();
 		for (const tok of tokens) {
 			const row = findTicker(tok, tickers);
-			if (row && !resolved.find(r => r.symbol === row.symbol)) {
-				resolved.push(row);
-			}
-			if (resolved.length >= MAX_RESULTS) break;
+			const sym = row?.symbol ?? tok;
+			if (seenSymbols.has(sym)) continue;
+			seenSymbols.add(sym);
+			resolved.push(row
+				? { symbol: row.symbol, name: row.name ?? undefined, type: toAssetType(row.type), tracked: true }
+				: { symbol: tok, type: 'stock', tracked: false },
+			);
 		}
 		if (!resolved.length) return;
 
 		try {
 			if ('sendTyping' in message.channel) await message.channel.sendTyping();
 			const results = await Promise.all(
-				resolved.map(async (row): Promise<{ row: TickerRow; price: PriceData } | null> => {
-					const price = await getAssetPrice(row.symbol, toAssetType(row.type));
-					return price ? { row, price } : null;
+				resolved.map(async (r): Promise<{ resolved: ResolvedTicker; price: PriceData } | null> => {
+					const price = await fetchPrice(r);
+					return price ? { resolved: r, price } : null;
 				}),
 			);
 			const embeds = results
-				.filter((r): r is { row: TickerRow; price: PriceData } => r !== null)
-				.map(r => getAssetEmbed(r.price, toAssetType(r.row.type), r.row.name ?? undefined));
+				.filter((r): r is { resolved: ResolvedTicker; price: PriceData } => r !== null)
+				.map(r => getAssetEmbed(r.price, r.resolved.type, r.resolved.name));
 			if (!embeds.length) return;
 			await message.reply({ embeds });
 		}

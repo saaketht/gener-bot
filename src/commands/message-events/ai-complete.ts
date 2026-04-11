@@ -10,7 +10,7 @@ import { getAiResponseEmbed, getAiErrorEmbed } from '../../embeds/embeds';
 import { COMMAND_MANIFEST } from '../../utils/commandManifest';
 import { fetchUserContext, fetchUserProfile, updateUserProfile } from '../../utils/userContext';
 import { WatchedTickers, UserProfiles } from '../../models/dbObjects';
-import { getAssetPrice, toAssetType } from '../../utils/priceApi';
+import { getAssetPrice, getPrice, toAssetType } from '../../utils/priceApi';
 
 const grok = new OpenAI({
 	apiKey: process.env.GROK_API_KEY!,
@@ -33,17 +33,6 @@ function isFinancialQuery(text: string): boolean {
 	return FINANCIAL_TICKER_RE.test(text) || FINANCIAL_KW_RE.test(text);
 }
 
-const FINANCIAL_SYSTEM_PROMPT = `You are generbot, a Discord bot. You've been routed a financial query — be factual and grounded.
-
-Rules:
-- Call lookup_ticker FIRST before saying anything about any symbol or instrument. No exceptions.
-- For live data (price, volume, news, earnings), use web_search. Only state figures you retrieved — never invent numbers.
-- If lookup_ticker returns found: false, say the symbol isn't tracked and stop. Don't describe what it might be, don't call it a shitcoin, token, coin, or anything else.
-- Use newlines to separate distinct thoughts — no walls of text. Keep it concise but readable.
-- No markdown. No bullet points. Lowercase is fine.
-- Sharp and direct. Not your financial advisor — but don't repeat that disclaimer every time.
-- The first word of the user's message is their name. There is no need to start every message with it`;
-
 function loadPrompt(filename: string): string {
 	// ts-node: src/commands/message-events/ → 3 up = root
 	// compiled: built/src/commands/message-events/ → 4 up = root
@@ -60,6 +49,7 @@ function loadPrompt(filename: string): string {
 }
 
 const SYSTEM_PROMPT = loadPrompt('generbot.txt');
+const FINANCIAL_SYSTEM_PROMPT = loadPrompt('generbot_finance.txt');
 
 function buildSystemPrompt(userContextStr: string, profileNotes: string | null): string {
 	let prompt = SYSTEM_PROMPT + '\n\nBot capabilities (mention casually when relevant, don\'t list them all):\n' + COMMAND_MANIFEST;
@@ -142,7 +132,7 @@ const SHARED_TOOLS: ToolDef[] = [
 const CLAUDE_ONLY_TOOLS: ToolDef[] = [
 	{
 		name: 'get_price',
-		description: 'Get current price data for a tracked symbol. Prefer this over web_search for price data. Always call lookup_ticker first — use the returned type to inform this call.',
+		description: 'Get current price data for any stock/ETF symbol, or a tracked crypto/commodity. Works for any valid ticker — does not need to be tracked for stocks. Prefer this over web_search for price data.',
 		parameters: {
 			type: 'object',
 			properties: { symbol: { type: 'string', description: 'Ticker symbol, e.g. AAPL, BTC, SPY' } },
@@ -209,9 +199,12 @@ const toolHandlers: Record<string, ToolHandler> = {
 		const sym = input.symbol;
 		if (!sym || typeof sym !== 'string') return JSON.stringify({ error: 'missing or invalid symbol' });
 		const ticker = await resolveTicker(sym, ctx.guildId, ctx.tickerCache);
-		const type = toAssetType(ticker?.type ?? 'stock');
-		const priceData = await getAssetPrice(sym.toUpperCase(), type);
-		if (priceData) return JSON.stringify(priceData);
+		// Tracked: use type-aware fetch (handles crypto/commodity normalization).
+		// Untracked: try raw symbol (works for any stock/ETF on major exchanges).
+		const priceData = ticker
+			? await getAssetPrice(sym.toUpperCase(), toAssetType(ticker.type))
+			: await getPrice(sym.toUpperCase());
+		if (priceData) return JSON.stringify({ ...priceData, tracked: !!ticker });
 		return JSON.stringify({ found: false, message: `no price data available for ${sym.toUpperCase()}` });
 	},
 
