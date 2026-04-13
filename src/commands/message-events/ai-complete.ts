@@ -505,6 +505,17 @@ const messageEvent: MessageEvent = {
 			return;
 		}
 
+		// Pull images from the replied-to message when using `ai` as a reply
+		let referencedMessage: Message | null = null;
+		if (isAiCommand && message.reference?.messageId) {
+			try {
+				referencedMessage = await message.channel.messages.fetch(message.reference.messageId);
+			}
+			catch {
+				// referenced message unavailable, continue without it
+			}
+		}
+
 		const financial = isFinancialQuery(message.content);
 		const routedModel = financial ? CLAUDE_MODEL : MODEL;
 		logger.info(`${message.author.username} ran ai [${routedModel}]: ${textPrompt.substring(0, 50)}...`);
@@ -527,9 +538,25 @@ const messageEvent: MessageEvent = {
 			if (financial) {
 				// Financial query → Claude (grounded, no hallucination)
 				const systemPrompt = buildFinancialSystemPrompt(userContextStr, profileNotes);
-				const claudeContent = buildClaudeContentParts(
-					{ ...message, content: textPrompt } as Message,
-				);
+				// Collect images from both the current message and the replied-to message
+				const refImages = referencedMessage ? extractImageUrls(referencedMessage) : [];
+				const userImages = extractImageUrls(message);
+				const allImages = [...refImages, ...userImages];
+
+				let claudeContent: string | Anthropic.ContentBlockParam[];
+				if (allImages.length > 0) {
+					const parts: Anthropic.ContentBlockParam[] = [];
+					for (const url of allImages) {
+						parts.push({ type: 'image', source: { type: 'url', url } });
+					}
+					parts.push({ type: 'text', text: textPrompt });
+					claudeContent = parts;
+				}
+				else {
+					claudeContent = buildClaudeContentParts(
+						{ ...message, content: textPrompt } as Message,
+					);
+				}
 				completion = await getClaudeFinancialResponse(
 					systemPrompt,
 					claudeContent,
@@ -554,9 +581,24 @@ const messageEvent: MessageEvent = {
 					logger.info(`Conversation history: ${history.length} messages`);
 				}
 				else {
-					const userContent = buildGrokContentParts(
-						{ ...message, content: textPrompt } as Message,
-					);
+					// Collect images from both the current message and the replied-to message
+					const refImages = referencedMessage ? extractImageUrls(referencedMessage) : [];
+					const userImages = extractImageUrls(message);
+					const allImages = [...refImages, ...userImages];
+
+					let userContent: string | Array<Record<string, unknown>>;
+					if (allImages.length > 0) {
+						const parts: Array<Record<string, unknown>> = [];
+						for (const url of allImages) {
+							parts.push({ type: 'input_image', image_url: url });
+						}
+						parts.push({ type: 'input_text', text: textPrompt });
+						userContent = parts;
+					}
+					else {
+						userContent = textPrompt;
+					}
+
 					input = [
 						{ role: 'user', content: userContent },
 					];
