@@ -263,27 +263,45 @@ async function executeTool(name: string, input: Record<string, any>, ctx: ToolCo
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/jpg'];
 const IMAGE_URL_REGEX = /https?:\/\/\S+\.(?:jpg|jpeg|png)(?:\?\S*)?/gi;
 
-function buildContentParts(msg: Message): string | Array<Record<string, unknown>> {
-	const text = msg.content;
+function extractImageUrls(msg: Message): string[] {
 	const imageUrls: string[] = [];
-
 	const attachedImages = msg.attachments.filter(
 		a => a.contentType && IMAGE_TYPES.includes(a.contentType),
 	);
 	for (const [, attachment] of attachedImages) {
 		imageUrls.push(attachment.url);
 	}
-
-	const urlMatches = text.match(IMAGE_URL_REGEX) || [];
+	const urlMatches = msg.content.match(IMAGE_URL_REGEX) || [];
 	imageUrls.push(...urlMatches);
+	return imageUrls;
+}
+
+// Responses API format (Grok)
+function buildGrokContentParts(msg: Message): string | Array<Record<string, unknown>> {
+	const text = msg.content;
+	const imageUrls = extractImageUrls(msg);
 
 	if (imageUrls.length > 0) {
 		const parts: Array<Record<string, unknown>> = [];
 		for (const url of imageUrls) {
-			parts.push({
-				type: 'image_url',
-				image_url: { url, detail: 'high' },
-			});
+			parts.push({ type: 'input_image', image_url: url });
+		}
+		parts.push({ type: 'input_text', text });
+		return parts;
+	}
+
+	return text;
+}
+
+// Anthropic format (Claude)
+function buildClaudeContentParts(msg: Message): string | Anthropic.ContentBlockParam[] {
+	const text = msg.content;
+	const imageUrls = extractImageUrls(msg);
+
+	if (imageUrls.length > 0) {
+		const parts: Anthropic.ContentBlockParam[] = [];
+		for (const url of imageUrls) {
+			parts.push({ type: 'image', source: { type: 'url', url } });
 		}
 		parts.push({ type: 'text', text });
 		return parts;
@@ -310,7 +328,7 @@ async function walkReplyChain(message: Message, botId: string): Promise<Array<{ 
 			// Strip "ai " prefix if present
 			const text = current.content.replace(/^ai\s+/i, '');
 			const stripped = { ...current, content: current.author.username + ': ' + text } as Message;
-			content = buildContentParts(stripped);
+			content = buildGrokContentParts(stripped);
 		}
 
 		history.unshift({ role, content });
@@ -359,13 +377,13 @@ async function isReplyToBot(message: Message, botId: string): Promise<boolean> {
 // Claude-based financial response — grounded in tool data, no hallucination
 async function getClaudeFinancialResponse(
 	systemPrompt: string,
-	userText: string,
+	userContent: string | Anthropic.ContentBlockParam[],
 	guildId: string | null,
 	message: Message,
 	signal: AbortSignal,
 ): Promise<string> {
 	const anthropicMessages: Anthropic.MessageParam[] = [
-		{ role: 'user', content: userText },
+		{ role: 'user', content: userContent },
 	];
 
 	const ctx: ToolContext = { guildId, message, tickerCache: new Map() };
@@ -509,9 +527,12 @@ const messageEvent: MessageEvent = {
 			if (financial) {
 				// Financial query → Claude (grounded, no hallucination)
 				const systemPrompt = buildFinancialSystemPrompt(userContextStr, profileNotes);
+				const claudeContent = buildClaudeContentParts(
+					{ ...message, content: textPrompt } as Message,
+				);
 				completion = await getClaudeFinancialResponse(
 					systemPrompt,
-					textPrompt,
+					claudeContent,
 					message.guildId,
 					message,
 					abortController.signal,
@@ -533,7 +554,7 @@ const messageEvent: MessageEvent = {
 					logger.info(`Conversation history: ${history.length} messages`);
 				}
 				else {
-					const userContent = buildContentParts(
+					const userContent = buildGrokContentParts(
 						{ ...message, content: textPrompt } as Message,
 					);
 					input = [
