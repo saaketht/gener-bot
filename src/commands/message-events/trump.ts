@@ -65,7 +65,7 @@ function buildEmbed(post: TruthPost, index: number): EmbedBuilder {
 		.setColor(0x1DA1F2)
 		.setAuthor({
 			name: 'Donald J. Trump',
-			iconURL: 'https://static-assets.truthsocial.com/tmtg:prime-ts-assets/avatars/original/missing.png',
+			iconURL: 'https://pbs.twimg.com/profile_images/874276197357596672/kUuht00m_200x200.jpg',
 			url: post.url,
 		})
 		.setDescription(description.length > 4096 ? description.slice(0, 4093) + '...' : description)
