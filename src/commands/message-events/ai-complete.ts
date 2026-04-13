@@ -141,11 +141,17 @@ const CLAUDE_ONLY_TOOLS: ToolDef[] = [
 	},
 ];
 
-// OpenAI/Grok format
-const TOOLS: OpenAI.ChatCompletionTool[] = SHARED_TOOLS.map(t => ({
-	type: 'function' as const,
-	function: { name: t.name, description: t.description, parameters: t.parameters },
-}));
+// OpenAI Responses API / Grok format (function tools + server-side web search)
+const GROK_TOOLS: any[] = [
+	{ type: 'web_search' },
+	...SHARED_TOOLS.map(t => ({
+		type: 'function' as const,
+		name: t.name,
+		description: t.description,
+		parameters: t.parameters,
+		strict: false,
+	})),
+];
 
 // Anthropic/Claude format (+ server-side web_search)
 const CLAUDE_TOOLS: Anthropic.Messages.ToolUnion[] = [
@@ -512,26 +518,25 @@ const messageEvent: MessageEvent = {
 				);
 			}
 			else {
-				// Chat/banter → Grok
+				// Chat/banter → Grok (Responses API with web search)
 				const systemPrompt = buildSystemPrompt(userContextStr, profileNotes);
 
-				// Build messages array — with history if replying
-				let messages: Array<{ role: string; content: any }>;
+				// Build input array for Responses API
+				let input: any[];
 
 				if (isReply) {
 					const history = await walkReplyChain(message, botId);
-					messages = [
-						{ role: 'system', content: systemPrompt },
-						...history,
-					];
+					input = history.map(h => ({
+						role: h.role,
+						content: h.content,
+					}));
 					logger.info(`Conversation history: ${history.length} messages`);
 				}
 				else {
 					const userContent = buildContentParts(
 						{ ...message, content: textPrompt } as Message,
 					);
-					messages = [
-						{ role: 'system', content: systemPrompt },
+					input = [
 						{ role: 'user', content: userContent },
 					];
 				}
@@ -539,65 +544,60 @@ const messageEvent: MessageEvent = {
 				const guildId = message.guildId;
 				const ctx: ToolContext = { guildId, message, tickerCache: new Map() };
 
-				let response = await grok.chat.completions.create({
+				let response = await grok.responses.create({
 					model: MODEL,
-					max_tokens: MAX_TOKENS,
-					messages: messages as any,
-					tools: TOOLS,
-				}, { signal: abortController.signal });
+					max_output_tokens: MAX_TOKENS,
+					instructions: systemPrompt,
+					input,
+					tools: GROK_TOOLS,
+				} as any, { signal: abortController.signal });
 
 				if (abortController.signal.aborted) return;
 
-				// Multi-round tool loop (up to 3 rounds for Grok)
+				// Multi-round tool loop for client-side function calls (up to 3 rounds)
 				const MAX_GROK_ROUNDS = 3;
 				let grokRounds = 0;
-				while (response.choices[0]?.message?.tool_calls && grokRounds < MAX_GROK_ROUNDS) {
-					grokRounds++;
-					const toolCalls = response.choices[0].message.tool_calls;
-					messages.push(response.choices[0].message as any);
+				let functionCalls: any[] = response.output.filter((item: any) => item.type === 'function_call');
 
-					for (const toolCall of toolCalls) {
+				while (functionCalls.length > 0 && grokRounds < MAX_GROK_ROUNDS) {
+					grokRounds++;
+					// Add all output items (including server-side web_search_call) back as context
+					input.push(...response.output);
+
+					for (const call of functionCalls) {
 						let args: Record<string, any>;
 						try {
-							args = JSON.parse(toolCall.function.arguments);
+							args = JSON.parse(call.arguments);
 						}
 						catch {
-							logger.warn(`grok sent unparseable tool args for ${toolCall.function.name}: ${toolCall.function.arguments}`);
+							logger.warn(`grok sent unparseable tool args for ${call.name}: ${call.arguments}`);
 							args = {};
 						}
-						const result = await executeTool(toolCall.function.name, args, ctx)
-							?? JSON.stringify({ error: `unknown tool: ${toolCall.function.name}` });
-						messages.push({
-							role: 'tool',
-							content: result,
-							tool_call_id: toolCall.id,
-						} as any);
+						const result = await executeTool(call.name, args, ctx)
+							?? JSON.stringify({ error: `unknown tool: ${call.name}` });
+						input.push({
+							type: 'function_call_output',
+							call_id: call.call_id,
+							output: result,
+						});
 					}
 
-					response = await grok.chat.completions.create({
+					response = await grok.responses.create({
 						model: MODEL,
-						max_tokens: MAX_TOKENS,
-						messages: messages as any,
-						tools: TOOLS,
-					}, { signal: abortController.signal });
+						max_output_tokens: MAX_TOKENS,
+						instructions: systemPrompt,
+						input,
+						tools: GROK_TOOLS,
+					} as any, { signal: abortController.signal });
 
 					if (abortController.signal.aborted) return;
+					functionCalls = response.output.filter((item: any) => item.type === 'function_call');
 				}
 
-				completion = response.choices[0]?.message?.content ?? '';
+				completion = response.output_text ?? '';
 
-				const reasoning = (response.choices[0]?.message as any)?.reasoning ?? '';
-				const tokens = response.usage;
-				logger.info(`tokens used { input: ${tokens?.prompt_tokens}, output: ${tokens?.completion_tokens} }, total: ${(tokens?.prompt_tokens ?? 0) + (tokens?.completion_tokens ?? 0)}`);
-
-				// Send reasoning first, italicized
-				if (reasoning) {
-					const thinkingLines = reasoning.split('\n').filter((line: string) => line.trim() !== '');
-					await message.channel.send('* ' + MODEL + ' thinking*');
-					for (const _line of thinkingLines) {
-						// TODO: send thinking chunks with delay
-					}
-				}
+				const tokens = response.usage as any;
+				logger.info(`tokens used { input: ${tokens?.input_tokens}, output: ${tokens?.output_tokens} }, total: ${(tokens?.input_tokens ?? 0) + (tokens?.output_tokens ?? 0)}`);
 			}
 
 			if (!completion) {
