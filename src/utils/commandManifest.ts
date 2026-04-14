@@ -17,7 +17,7 @@ Slash commands:
 - /server — view server info
 
 Message commands (type these in chat):
-- "ai <message>" — talk to me
+- "ai <message>" — talk to me (can also pull up PNL, prices, and flights)
 - "ai-image <prompt>" — generate an image
 - "ai-video <prompt>" — generate a video
 - "weather <city>" — get weather

@@ -11,6 +11,12 @@ import { COMMAND_MANIFEST } from '../../utils/commandManifest';
 import { fetchUserContext, fetchUserProfile, updateUserProfile } from '../../utils/userContext';
 import { WatchedTickers, UserProfiles } from '../../models/dbObjects';
 import { getAssetPrice, getPrice, toAssetType } from '../../utils/priceApi';
+import { readTradesCSV } from '../../utils/tradeData';
+import { parseTradesCSV, normalizeDate, getTodayDateStr, getPnlEmbed } from '../../embeds/pnl-embeds';
+import { getUniqueTradingDays, getDaySummary, getRecapEmbed } from '../../embeds/recap-embeds';
+import { getAssetEmbed } from '../../embeds/asset-embeds';
+import { fetchFlightStatus } from '../../utils/flightApi';
+import { getFlightTrackingEmbed } from '../../embeds/flight-embeds';
 
 const grok = new OpenAI({
 	apiKey: process.env.GROK_API_KEY!,
@@ -127,16 +133,43 @@ const SHARED_TOOLS: ToolDef[] = [
 			required: ['user'],
 		},
 	},
-];
-
-const CLAUDE_ONLY_TOOLS: ToolDef[] = [
 	{
 		name: 'get_price',
-		description: 'Get current price data for any stock/ETF symbol, or a tracked crypto/commodity. Works for any valid ticker — does not need to be tracked for stocks. Prefer this over web_search for price data.',
+		description: 'Get current price data for any stock/ETF symbol, or a tracked crypto/commodity. Works for any valid ticker. Prefer this over web_search for price data.',
 		parameters: {
 			type: 'object',
-			properties: { symbol: { type: 'string', description: 'Ticker symbol, e.g. AAPL, BTC, SPY' } },
+			properties: {
+				symbol: { type: 'string', description: 'Ticker symbol, e.g. AAPL, BTC, SPY' },
+				show_embed: { type: 'boolean', description: 'Send a visual price card to the channel. Default false — set true when the user asks to "show", "pull up", or "check" a ticker.' },
+			},
 			required: ['symbol'],
+		},
+	},
+	{
+		name: 'get_trades',
+		description: 'Get SPY 0DTE trading data. Returns today\'s trades by default, a specific date, or a multi-day recap. Use for PNL, trading performance, win rate, or any trade-related question.',
+		parameters: {
+			type: 'object',
+			properties: {
+				mode: { type: 'string', enum: ['today', 'date', 'recap'], description: 'today = current day, date = specific date, recap = multi-day summary' },
+				date: { type: 'string', description: 'Date in M/D/YYYY format. Required when mode=date.' },
+				days: { type: 'number', description: 'Number of days for recap mode (1-30, default 5)' },
+				show_embed: { type: 'boolean', description: 'Send the visual PNL/recap embed to the channel. Default true. Set false to silently fetch data for analysis without showing the card.' },
+			},
+			required: ['mode'],
+		},
+	},
+	{
+		name: 'get_flight_status',
+		description: 'Look up real-time flight status by flight number (e.g. UA123, DL456). Returns departure/arrival times, delays, gates, and progress.',
+		parameters: {
+			type: 'object',
+			properties: {
+				flight_number: { type: 'string', description: 'IATA flight number, e.g. UA123' },
+				date: { type: 'string', description: 'Flight date as YYYY-MM-DD. Defaults to today.' },
+				show_embed: { type: 'boolean', description: 'Send the visual flight tracking embed to the channel. Default true.' },
+			},
+			required: ['flight_number'],
 		},
 	},
 ];
@@ -156,7 +189,7 @@ const GROK_TOOLS: any[] = [
 // Anthropic/Claude format (+ server-side web_search)
 const CLAUDE_TOOLS: Anthropic.Messages.ToolUnion[] = [
 	{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 },
-	...[...CLAUDE_ONLY_TOOLS, ...SHARED_TOOLS].map(t => ({
+	...SHARED_TOOLS.map(t => ({
 		name: t.name,
 		description: t.description,
 		input_schema: t.parameters as Anthropic.Messages.Tool['input_schema'],
@@ -173,6 +206,7 @@ interface ToolContext {
 	guildId: string | null;
 	message: Message;
 	tickerCache: TickerCache;
+	sentEmbedIds: string[];
 }
 
 async function resolveTicker(symbol: string, guildId: string | null, cache: TickerCache): Promise<{ symbol: string; name: string | null; type: string } | null> {
@@ -204,14 +238,142 @@ const toolHandlers: Record<string, ToolHandler> = {
 	async get_price(input, ctx) {
 		const sym = input.symbol;
 		if (!sym || typeof sym !== 'string') return JSON.stringify({ error: 'missing or invalid symbol' });
+		const showEmbed = input.show_embed === true;
 		const ticker = await resolveTicker(sym, ctx.guildId, ctx.tickerCache);
-		// Tracked: use type-aware fetch (handles crypto/commodity normalization).
-		// Untracked: try raw symbol (works for any stock/ETF on major exchanges).
+		const type = ticker ? toAssetType(ticker.type) : 'stock' as const;
 		const priceData = ticker
-			? await getAssetPrice(sym.toUpperCase(), toAssetType(ticker.type))
+			? await getAssetPrice(sym.toUpperCase(), type)
 			: await getPrice(sym.toUpperCase());
-		if (priceData) return JSON.stringify({ ...priceData, tracked: !!ticker });
-		return JSON.stringify({ found: false, message: `no price data available for ${sym.toUpperCase()}` });
+		if (!priceData) return JSON.stringify({ found: false, message: `no price data available for ${sym.toUpperCase()}` });
+		if (showEmbed && ctx.message.channel.isSendable()) {
+			const embed = getAssetEmbed(priceData, type, ticker?.name ?? undefined);
+			const sent = await ctx.message.channel.send({ embeds: [embed] });
+			ctx.sentEmbedIds.push(sent.id);
+		}
+		return JSON.stringify({ ...priceData, tracked: !!ticker, embed_sent: showEmbed });
+	},
+
+	async get_trades(input, ctx) {
+		const mode = input.mode ?? 'today';
+		const showEmbed = input.show_embed !== false;
+		try {
+			const csv = await readTradesCSV();
+			const allTrades = parseTradesCSV(csv);
+
+			if (mode === 'recap') {
+				const days = Math.min(Math.max(input.days ?? 5, 1), 30);
+				const tradingDays = getUniqueTradingDays(allTrades).slice(0, days);
+				if (tradingDays.length === 0) return JSON.stringify({ error: 'no trades found' });
+
+				const summaries = tradingDays.map(date => {
+					const dayTrades = allTrades.filter(t => normalizeDate(t.date) === date);
+					return getDaySummary(dayTrades);
+				});
+
+				if (showEmbed && ctx.message.channel.isSendable()) {
+					const embed = getRecapEmbed(allTrades, days);
+					const sent = await ctx.message.channel.send({ embeds: [embed] });
+					ctx.sentEmbedIds.push(sent.id);
+				}
+
+				const totalPnl = summaries.reduce((s, d) => s + d.pnl, 0);
+				const totalWins = summaries.reduce((s, d) => s + d.wins, 0);
+				const totalLosses = summaries.reduce((s, d) => s + d.losses, 0);
+				return JSON.stringify({
+					mode: 'recap',
+					days: summaries.length,
+					totalPnl,
+					totalWins,
+					totalLosses,
+					totalTrades: summaries.reduce((s, d) => s + d.tradeCount, 0),
+					dailySummaries: summaries.map(s => ({
+						date: s.date, pnl: s.pnl, wins: s.wins, losses: s.losses,
+					})),
+					embed_sent: showEmbed,
+				});
+			}
+
+			// mode = 'today' or 'date'
+			const dateStr = mode === 'date' && input.date
+				? normalizeDate(input.date)
+				: getTodayDateStr();
+			const dayTrades = allTrades.filter(t => normalizeDate(t.date) === dateStr);
+
+			if (dayTrades.length === 0) {
+				return JSON.stringify({ error: `no trades found for ${dateStr}` });
+			}
+
+			if (showEmbed && ctx.message.channel.isSendable()) {
+				const embed = getPnlEmbed(dayTrades, dateStr);
+				const sent = await ctx.message.channel.send({ embeds: [embed] });
+				ctx.sentEmbedIds.push(sent.id);
+			}
+
+			const totalPnl = dayTrades.reduce((s, t) => s + t.pnl, 0);
+			const totalRisk = dayTrades.reduce((s, t) => s + Math.abs(t.entryCost), 0);
+			const wins = dayTrades.filter(t => t.isWin).length;
+			return JSON.stringify({
+				mode: mode === 'date' ? 'date' : 'today',
+				date: dateStr,
+				totalPnl,
+				totalPnlPct: totalRisk > 0 ? (totalPnl / totalRisk) * 100 : 0,
+				wins,
+				losses: dayTrades.length - wins,
+				tradeCount: dayTrades.length,
+				totalRisk,
+				embed_sent: showEmbed,
+			});
+		}
+		catch (err) {
+			return JSON.stringify({ error: `failed to read trade data: ${err instanceof Error ? err.message : 'unknown'}` });
+		}
+	},
+
+	async get_flight_status(input, ctx) {
+		const flightNumber = input.flight_number;
+		if (!flightNumber || typeof flightNumber !== 'string') {
+			return JSON.stringify({ error: 'missing or invalid flight_number' });
+		}
+		const showEmbed = input.show_embed !== false;
+		const today = new Date().toISOString().slice(0, 10);
+		const date = input.date ?? today;
+
+		const data = await fetchFlightStatus(flightNumber.toUpperCase(), date);
+		if (!data) {
+			return JSON.stringify({ found: false, message: `no flight data found for ${flightNumber} on ${date}` });
+		}
+
+		if (showEmbed && ctx.message.channel.isSendable()) {
+			const embed = getFlightTrackingEmbed(data);
+			const sent = await ctx.message.channel.send({ embeds: [embed] });
+			ctx.sentEmbedIds.push(sent.id);
+		}
+
+		return JSON.stringify({
+			found: true,
+			flightNumber: data.flightNumber,
+			airline: data.airline?.name,
+			status: data.status,
+			departure: {
+				airport: data.departure?.airport?.iata,
+				scheduledTime: data.departure?.scheduledTime,
+				actualTime: data.departure?.actualTime,
+				delay: data.departure?.delay,
+				terminal: data.departure?.terminal,
+				gate: data.departure?.gate,
+			},
+			arrival: {
+				airport: data.arrival?.airport?.iata,
+				scheduledTime: data.arrival?.scheduledTime,
+				actualTime: data.arrival?.actualTime,
+				estimatedTime: data.arrival?.estimatedTime,
+				delay: data.arrival?.delay,
+				terminal: data.arrival?.terminal,
+				gate: data.arrival?.gate,
+			},
+			aircraft: data.aircraft?.model,
+			embed_sent: showEmbed,
+		});
 	},
 
 	async lookup_user(input, ctx) {
@@ -381,12 +543,12 @@ async function getClaudeFinancialResponse(
 	guildId: string | null,
 	message: Message,
 	signal: AbortSignal,
-): Promise<string> {
+): Promise<{ text: string; sentEmbedIds: string[] }> {
 	const anthropicMessages: Anthropic.MessageParam[] = [
 		{ role: 'user', content: userContent },
 	];
 
-	const ctx: ToolContext = { guildId, message, tickerCache: new Map() };
+	const ctx: ToolContext = { guildId, message, tickerCache: new Map(), sentEmbedIds: [] };
 
 	let response = await claude.messages.create({
 		model: CLAUDE_MODEL,
@@ -396,7 +558,7 @@ async function getClaudeFinancialResponse(
 		tools: CLAUDE_TOOLS,
 	});
 
-	if (signal.aborted) return '';
+	if (signal.aborted) return { text: '', sentEmbedIds: [] };
 
 	// Tool use loop — Claude may chain multiple tool calls (e.g. lookup_ticker → get_price → web_search)
 	const MAX_TOOL_ROUNDS = 5;
@@ -433,7 +595,7 @@ async function getClaudeFinancialResponse(
 			tools: CLAUDE_TOOLS,
 		});
 
-		if (signal.aborted) return '';
+		if (signal.aborted) return { text: '', sentEmbedIds: ctx.sentEmbedIds };
 	}
 
 	if (rounds >= MAX_TOOL_ROUNDS) {
@@ -445,7 +607,7 @@ async function getClaudeFinancialResponse(
 	if (!text) {
 		logger.warn(`claude returned no text. stop_reason=${response.stop_reason} rounds=${rounds} content_types=${response.content.map(b => b.type).join(',')}`);
 	}
-	return text;
+	return { text, sentEmbedIds: ctx.sentEmbedIds };
 }
 
 const messageEvent: MessageEvent = {
@@ -534,6 +696,7 @@ const messageEvent: MessageEvent = {
 			]);
 
 			let completion: string;
+			let toolEmbedIds: string[] = [];
 
 			if (financial) {
 				// Financial query → Claude (grounded, no hallucination)
@@ -557,13 +720,15 @@ const messageEvent: MessageEvent = {
 						{ ...message, content: textPrompt } as Message,
 					);
 				}
-				completion = await getClaudeFinancialResponse(
+				const claudeResult = await getClaudeFinancialResponse(
 					systemPrompt,
 					claudeContent,
 					message.guildId,
 					message,
 					abortController.signal,
 				);
+				completion = claudeResult.text;
+				toolEmbedIds = claudeResult.sentEmbedIds;
 			}
 			else {
 				// Chat/banter → Grok (Responses API with web search)
@@ -605,7 +770,7 @@ const messageEvent: MessageEvent = {
 				}
 
 				const guildId = message.guildId;
-				const ctx: ToolContext = { guildId, message, tickerCache: new Map() };
+				const ctx: ToolContext = { guildId, message, tickerCache: new Map(), sentEmbedIds: [] };
 
 				let response = await grok.responses.create({
 					model: MODEL,
@@ -658,6 +823,7 @@ const messageEvent: MessageEvent = {
 				}
 
 				completion = response.output_text ?? '';
+				toolEmbedIds = ctx.sentEmbedIds;
 
 				const tokens = response.usage as any;
 				logger.info(`tokens used { input: ${tokens?.input_tokens}, output: ${tokens?.output_tokens} }, total: ${(tokens?.input_tokens ?? 0) + (tokens?.output_tokens ?? 0)}`);
@@ -691,6 +857,7 @@ const messageEvent: MessageEvent = {
 					await new Promise(r => setTimeout(r, 800));
 				}
 			}
+			sentIds.push(...toolEmbedIds);
 			cacheResponse(sentIds, completion);
 
 			// Async profile update — fire and forget, never blocks response

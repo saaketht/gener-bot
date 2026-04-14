@@ -11,9 +11,7 @@ import {
 	parseCashFlowJson,
 	getCashFlowEmbed,
 } from '../../embeds/recap-embeds';
-
-const CSV_PATH = process.env.PNL_CSV_PATH
-	|| join(homedir(), 'rh-trade-exporter', 'outputs', 'spy_trades.csv');
+import { readTradesCSV } from '../../utils/tradeData';
 
 const CASH_FLOW_PATH = process.env.CASH_FLOW_JSONL_PATH
 	|| join(homedir(), 'rh-trade-exporter', 'outputs', 'cash_flow.jsonl');
@@ -31,7 +29,7 @@ async function handleRecap(message: Message, dayCount: number) {
 	try {
 		if ('sendTyping' in message.channel) await message.channel.sendTyping();
 
-		const csv = await readFile(CSV_PATH, 'utf-8');
+		const csv = await readTradesCSV();
 		const allTrades = parseTradesCSV(csv);
 		const days = getUniqueTradingDays(allTrades);
 

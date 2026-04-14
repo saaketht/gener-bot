@@ -1,6 +1,3 @@
-import { readFile } from 'fs/promises';
-import { homedir } from 'os';
-import { join } from 'path';
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { MessageEvent } from '../../types';
 import logger from '../../utils/logger';
@@ -12,9 +9,7 @@ import {
 	getNoTradesEmbed,
 } from '../../embeds/pnl-embeds';
 import { getUniqueTradingDays, getDaySummary, buildRecapBlock } from '../../embeds/recap-embeds';
-
-const CSV_PATH = process.env.PNL_CSV_PATH
-	|| join(homedir(), 'rh-trade-exporter', 'outputs', 'spy_trades.csv');
+import { readTradesCSV } from '../../utils/tradeData';
 
 function detailButton(dateStr: string): ActionRowBuilder<ButtonBuilder> {
 	return new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -40,7 +35,7 @@ const messageEvent: MessageEvent = {
 		try {
 			if ('sendTyping' in message.channel) await message.channel.sendTyping();
 
-			const csv = await readFile(CSV_PATH, 'utf-8');
+			const csv = await readTradesCSV();
 			const allTrades = parseTradesCSV(csv);
 			const dayTrades = allTrades.filter(
 				t => normalizeDate(t.date) === requestedDate,
