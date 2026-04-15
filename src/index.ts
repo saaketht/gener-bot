@@ -6,9 +6,6 @@ import { readCommands, readEvents, readMessageEvents } from './utils/loader';
 // import modules
 import dotenv from 'dotenv';
 import http from 'http';
-import path from 'path';
-import { GameEngine } from './game/GameEngine';
-import { GameStorage } from './game/GameStorage';
 dotenv.config();
 
 // create a new database instance
@@ -26,27 +23,6 @@ const client: DiscordClient = new Client({
 }) as DiscordClient;
 // create a new collection for commands
 client.commands = new Collection<string, Command>();
-// active adventure games registry (shared via client object to avoid module duplication)
-client.activeGames = new Map();
-
-// Restore saved adventure games from disk
-const _gameStorage = new GameStorage(path.join(process.cwd(), 'data', 'games'));
-const savedGameIds = _gameStorage.listGames();
-for (const threadId of savedGameIds) {
-	try {
-		const state = _gameStorage.loadGame(threadId);
-		if (state) {
-			client.activeGames.set(threadId, new GameEngine(state));
-		}
-	}
-	catch (err) {
-		console.error(`[startup] Failed to restore game ${threadId}:`, err);
-	}
-}
-if (savedGameIds.length > 0) {
-	console.log(`Restored ${client.activeGames.size} adventure games from disk.`);
-}
-
 // read in message event files
 readMessageEvents().then((messageEvents) => {
 	// listener for message creation events

@@ -602,6 +602,8 @@ async function getClaudeFinancialResponse(
 		logger.warn(`claude hit max tool rounds (${MAX_TOOL_ROUNDS})`);
 	}
 
+	logger.info(`claude tokens used { input: ${response.usage.input_tokens}, output: ${response.usage.output_tokens} }, total: ${response.usage.input_tokens + response.usage.output_tokens}`);
+
 	const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === 'text');
 	const text = textBlocks.map(b => b.text).join('\n').trim();
 	if (!text) {

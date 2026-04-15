@@ -55,6 +55,7 @@ const messageEvent: MessageEvent = {
 				return;
 			}
 
+			logger.info(`pnl: ${message.author.username} → ${requestedDate} (${dayTrades.length} trades)`);
 			await message.reply({
 				embeds: [getPnlEmbed(dayTrades, requestedDate)],
 				components: [detailButton(requestedDate)],

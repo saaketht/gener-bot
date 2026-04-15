@@ -5,7 +5,6 @@
  */
 export const COMMAND_MANIFEST = `
 Slash commands:
-- /adventure — start a multiplayer text RPG in a new thread
 - /balance — check your coin balance
 - /daily — claim 100 coins (24h cooldown)
 - /shop [item] — view shop or buy items (Tea 1c, Coffee 2c, Cake 5c)
