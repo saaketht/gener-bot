@@ -254,6 +254,12 @@ const toolHandlers: Record<string, ToolHandler> = {
 	},
 
 	async get_trades(input, ctx) {
+		// Gate access: only users with a profile in user_profiles can view trades
+		const profile = await UserProfiles.findOne({ where: { user_id: ctx.message.author.id } });
+		if (!profile) {
+			return JSON.stringify({ error: 'you don\'t have access to trade data' });
+		}
+
 		const mode = input.mode ?? 'today';
 		const showEmbed = input.show_embed !== false;
 		try {

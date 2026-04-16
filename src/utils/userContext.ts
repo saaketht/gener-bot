@@ -69,7 +69,7 @@ export function updateUserProfile(userId: string, username: string, recentExchan
 				messages: [
 					{
 						role: 'system',
-						content: 'You are a memory assistant for a Discord bot. Given a recent chat excerpt and existing notes about a user, write 2-3 concise notes capturing their interests, personality, or patterns. Be direct and specific. No preamble, just the notes.',
+						content: 'You are a memory assistant for a Discord bot. Given a recent chat excerpt and existing notes about a user, update their personality notes. Prioritize: communication style, recurring topics, humor/tone. Deprioritize: one-off questions, specific factual queries. Preserve existing observations that still hold. Max 3 bullet points, each under 20 words. No preamble, just the notes.',
 					},
 					{
 						role: 'user',
