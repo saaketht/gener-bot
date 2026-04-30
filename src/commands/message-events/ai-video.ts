@@ -55,7 +55,7 @@ const messageEvent: MessageEvent = {
 					body: JSON.stringify({
 						model: 'grok-imagine-video',
 						prompt: prompt,
-						duration: 5,
+						duration: 10,
 						aspect_ratio: '16:9',
 						resolution: '720p',
 					}),
