@@ -559,14 +559,12 @@ async function isReplyToBot(message: Message, botId: string): Promise<boolean> {
 // Claude-based financial response — grounded in tool data, no hallucination
 async function getClaudeFinancialResponse(
 	systemPrompt: string,
-	userContent: string | Anthropic.ContentBlockParam[],
+	messages: Anthropic.MessageParam[],
 	guildId: string | null,
 	message: Message,
 	signal: AbortSignal,
 ): Promise<{ text: string; sentEmbedIds: string[] }> {
-	const anthropicMessages: Anthropic.MessageParam[] = [
-		{ role: 'user', content: userContent },
-	];
+	const anthropicMessages: Anthropic.MessageParam[] = [...messages];
 
 	const ctx: ToolContext = { guildId, message, tickerCache: new Map(), sentEmbedIds: [] };
 
@@ -724,6 +722,17 @@ const messageEvent: MessageEvent = {
 			if (financial) {
 				// Financial query → Claude (grounded, no hallucination)
 				const systemPrompt = buildFinancialSystemPrompt(userContextStr);
+
+				// Prepend rolling per-channel history (text-only, image fidelity lost)
+				const anthropicMessages: Anthropic.MessageParam[] = [];
+				const buffered = getChannelHistory(channelId);
+				for (const turn of buffered) {
+					anthropicMessages.push({ role: turn.role, content: turn.content });
+				}
+				if (buffered.length > 0) {
+					logger.info(`Conversation history (channel buffer): ${buffered.length} messages`);
+				}
+
 				// Collect images from both the current message and the replied-to message
 				const refImages = referencedMessage ? extractImageUrls(referencedMessage) : [];
 				const userImages = extractImageUrls(message);
@@ -743,9 +752,11 @@ const messageEvent: MessageEvent = {
 						{ ...message, content: wrappedUserText } as Message,
 					);
 				}
+				anthropicMessages.push({ role: 'user', content: claudeContent });
+
 				const claudeResult = await getClaudeFinancialResponse(
 					systemPrompt,
-					claudeContent,
+					anthropicMessages,
 					message.guildId,
 					message,
 					abortController.signal,
