@@ -8,7 +8,7 @@ import { rateLimiter } from '../../utils/rateLimiter';
 import logger from '../../utils/logger';
 import { getAiResponseEmbed, getAiErrorEmbed } from '../../embeds/embeds';
 import { COMMAND_MANIFEST } from '../../utils/commandManifest';
-import { fetchUserContext, fetchUserProfile, updateUserProfile } from '../../utils/userContext';
+import { fetchUserContext } from '../../utils/userContext';
 import { WatchedTickers, UserProfiles } from '../../models/dbObjects';
 import { getAssetPrice, getPrice, toAssetType } from '../../utils/priceApi';
 import { readTradesCSV } from '../../utils/tradeData';
@@ -57,17 +57,17 @@ function loadPrompt(filename: string): string {
 const SYSTEM_PROMPT = loadPrompt('generbot.txt');
 const FINANCIAL_SYSTEM_PROMPT = loadPrompt('generbot_finance.txt');
 
-function buildSystemPrompt(userContextStr: string, profileNotes: string | null): string {
+function buildSystemPrompt(userContextStr: string): string {
 	let prompt = SYSTEM_PROMPT + '\n\nBot capabilities (mention casually when relevant, don\'t list them all):\n' + COMMAND_MANIFEST;
-	if (profileNotes) prompt += '\n\nAbout this user:\n' + profileNotes;
 	prompt += '\n\nUser data: ' + userContextStr;
+	prompt += '\n\nConversation format: each turn is wrapped as <msg from="username">text</msg>. The "from" attribute identifies the speaker — multiple users may participate in one thread. Your own past replies are tagged from="generBot". Never include these tags in your own output.';
 	return prompt;
 }
 
-function buildFinancialSystemPrompt(userContextStr: string, profileNotes: string | null): string {
+function buildFinancialSystemPrompt(userContextStr: string): string {
 	let prompt = FINANCIAL_SYSTEM_PROMPT;
-	if (profileNotes) prompt += '\n\nAbout this user:\n' + profileNotes;
 	prompt += '\n\nUser data: ' + userContextStr;
+	prompt += '\n\nConversation format: each turn is wrapped as <msg from="username">text</msg>. The "from" attribute identifies the speaker — multiple users may participate in one thread. Your own past replies are tagged from="generBot". Never include these tags in your own output.';
 	return prompt;
 }
 
@@ -82,6 +82,57 @@ function chunkText(text: string, maxLen = 2000): string[] {
 // Maps any bot message ID to the full completion text it was part of
 const responseCache = new Map<string, string>();
 const CACHE_MAX = 50;
+
+// Per-channel rolling chat history, used as fallback context when the user
+// doesn't reply directly to the bot. Keyed by channelId; turns are wrapped
+// in <msg from="..."> tags so the model can distinguish speakers.
+type ChatModel = 'claude' | 'grok';
+type ChatTurn = { role: 'user' | 'assistant'; content: string; ts: number; model?: ChatModel };
+const channelHistory = new Map<string, ChatTurn[]>();
+const HISTORY_MAX_TURNS = 16;
+const HISTORY_TTL_MS = 30 * 60 * 1000;
+
+function escapeXmlAttr(s: string): string {
+	return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+function wrapUser(username: string, text: string): string {
+	return `<msg from="${escapeXmlAttr(username)}">${text}</msg>`;
+}
+
+function wrapAssistant(text: string): string {
+	return `<msg from="generBot">${text}</msg>`;
+}
+
+function getChannelHistory(channelId: string): ChatTurn[] {
+	const arr = channelHistory.get(channelId);
+	if (!arr) return [];
+	const cutoff = Date.now() - HISTORY_TTL_MS;
+	const fresh = arr.filter(t => t.ts >= cutoff);
+	if (fresh.length !== arr.length) {
+		if (fresh.length === 0) channelHistory.delete(channelId);
+		else channelHistory.set(channelId, fresh);
+	}
+	return fresh;
+}
+
+function recordChannelTurns(channelId: string, userContent: string, assistantContent: string, model: ChatModel) {
+	const arr = channelHistory.get(channelId) ?? [];
+	const now = Date.now();
+	arr.push({ role: 'user', content: userContent, ts: now });
+	arr.push({ role: 'assistant', content: assistantContent, ts: now, model });
+	while (arr.length > HISTORY_MAX_TURNS) arr.shift();
+	channelHistory.set(channelId, arr);
+}
+
+function lastChannelModel(channelId: string): ChatModel | null {
+	const buffered = getChannelHistory(channelId);
+	for (let i = buffered.length - 1; i >= 0; i--) {
+		const t = buffered[i];
+		if (t.role === 'assistant' && t.model) return t.model;
+	}
+	return null;
+}
 
 // Active AI generation state per channel — for cancellation
 const activeGenerations = new Map<string, AbortController>();
@@ -122,15 +173,6 @@ const SHARED_TOOLS: ToolDef[] = [
 			type: 'object',
 			properties: { symbol: { type: 'string', description: 'Ticker symbol, e.g. AAPL, BTC, SPY' } },
 			required: ['symbol'],
-		},
-	},
-	{
-		name: 'lookup_user',
-		description: 'Look up another user\'s profile and personality notes. Use when someone asks about, mentions, or references another person in the server — by name or by @mention.',
-		parameters: {
-			type: 'object',
-			properties: { user: { type: 'string', description: 'Username or Discord user ID (from <@id> mentions) to look up' } },
-			required: ['user'],
 		},
 	},
 	{
@@ -382,36 +424,6 @@ const toolHandlers: Record<string, ToolHandler> = {
 		});
 	},
 
-	async lookup_user(input, ctx) {
-		const userQuery = input.user;
-		if (!userQuery || typeof userQuery !== 'string') return JSON.stringify({ error: 'missing or invalid user' });
-		const message = ctx.message;
-
-		// Strip <@> mention syntax to get raw ID
-		const idMatch = userQuery.match(/^<?@?(\d{17,20})>?$/);
-		let profile: any = null;
-
-		if (idMatch) {
-			profile = await UserProfiles.findOne({ where: { user_id: idMatch[1] } });
-		}
-		else {
-			const allProfiles: any[] = await UserProfiles.findAll();
-			profile = allProfiles.find(
-				p => p.username && p.username.toLowerCase() === userQuery.toLowerCase(),
-			);
-			if (!profile && message.guild) {
-				const members = await message.guild.members.fetch({ query: userQuery, limit: 1 });
-				const member = members.first();
-				if (member) {
-					profile = await UserProfiles.findOne({ where: { user_id: member.id } });
-				}
-			}
-		}
-
-		if (!profile) return JSON.stringify({ found: false, message: `no user found matching "${userQuery}"` });
-		if (!profile.notes) return JSON.stringify({ found: true, user_id: profile.user_id, username: profile.username, notes: null, message: 'no profile notes yet for this user' });
-		return JSON.stringify({ found: true, user_id: profile.user_id, username: profile.username, notes: profile.notes });
-	},
 };
 
 async function executeTool(name: string, input: Record<string, any>, ctx: ToolContext): Promise<string | null> {
@@ -490,12 +502,14 @@ async function walkReplyChain(message: Message, botId: string): Promise<Array<{ 
 
 		if (isBotMsg) {
 			// Use cached full response if available, otherwise just this message
-			content = responseCache.get(current.id) ?? current.content;
+			const raw = responseCache.get(current.id) ?? current.content;
+			content = wrapAssistant(raw);
 		}
 		else {
 			// Strip "ai " prefix if present
 			const text = current.content.replace(/^ai\s+/i, '');
-			const stripped = { ...current, content: current.author.username + ': ' + text } as Message;
+			const wrapped = wrapUser(current.author.username, text);
+			const stripped = { ...current, content: wrapped } as Message;
 			content = buildGrokContentParts(stripped);
 		}
 
@@ -666,14 +680,16 @@ const messageEvent: MessageEvent = {
 			return;
 		}
 
-		const textPrompt = isAiCommand
-			? message.author.username + ': ' + message.content.slice(3).trim()
-			: message.author.username + ': ' + message.content.trim();
+		const userText = isAiCommand
+			? message.content.slice(3).trim()
+			: message.content.trim();
 
-		if (!textPrompt) {
+		if (!userText) {
 			await message.reply('usage: `ai <your question>`');
 			return;
 		}
+
+		const wrappedUserText = wrapUser(message.author.username, userText);
 
 		// Pull images from the replied-to message when using `ai` as a reply
 		let referencedMessage: Message | null = null;
@@ -686,9 +702,12 @@ const messageEvent: MessageEvent = {
 			}
 		}
 
-		const financial = isFinancialQuery(message.content);
+		const explicitFinancial = isFinancialQuery(message.content);
+		const stickyClaude = !explicitFinancial && lastChannelModel(channelId) === 'claude';
+		const financial = explicitFinancial || stickyClaude;
 		const routedModel = financial ? CLAUDE_MODEL : MODEL;
-		logger.info(`${message.author.username} ran ai [${routedModel}]: ${textPrompt.substring(0, 50)}...`);
+		const routeNote = stickyClaude ? ' (sticky)' : '';
+		logger.info(`${message.author.username} ran ai [${routedModel}${routeNote}]: ${userText.substring(0, 50)}...`);
 
 		const abortController = new AbortController();
 		activeGenerations.set(channelId, abortController);
@@ -697,18 +716,14 @@ const messageEvent: MessageEvent = {
 			// Show typing indicator
 			await message.channel.sendTyping();
 
-			// Fetch user context and profile in parallel for enriched system prompt
-			const [userContextStr, profileNotes] = await Promise.all([
-				fetchUserContext(message.author.id),
-				fetchUserProfile(message.author.id),
-			]);
+			const userContextStr = await fetchUserContext(message.author.id);
 
 			let completion: string;
 			let toolEmbedIds: string[] = [];
 
 			if (financial) {
 				// Financial query → Claude (grounded, no hallucination)
-				const systemPrompt = buildFinancialSystemPrompt(userContextStr, profileNotes);
+				const systemPrompt = buildFinancialSystemPrompt(userContextStr);
 				// Collect images from both the current message and the replied-to message
 				const refImages = referencedMessage ? extractImageUrls(referencedMessage) : [];
 				const userImages = extractImageUrls(message);
@@ -720,12 +735,12 @@ const messageEvent: MessageEvent = {
 					for (const url of allImages) {
 						parts.push({ type: 'image', source: { type: 'url', url } });
 					}
-					parts.push({ type: 'text', text: textPrompt });
+					parts.push({ type: 'text', text: wrappedUserText });
 					claudeContent = parts;
 				}
 				else {
 					claudeContent = buildClaudeContentParts(
-						{ ...message, content: textPrompt } as Message,
+						{ ...message, content: wrappedUserText } as Message,
 					);
 				}
 				const claudeResult = await getClaudeFinancialResponse(
@@ -740,7 +755,7 @@ const messageEvent: MessageEvent = {
 			}
 			else {
 				// Chat/banter → Grok (Responses API with web search)
-				const systemPrompt = buildSystemPrompt(userContextStr, profileNotes);
+				const systemPrompt = buildSystemPrompt(userContextStr);
 
 				// Build input array for Responses API
 				let input: any[];
@@ -751,9 +766,20 @@ const messageEvent: MessageEvent = {
 						role: h.role,
 						content: h.content,
 					}));
-					logger.info(`Conversation history: ${history.length} messages`);
+					logger.info(`Conversation history (reply chain): ${history.length} messages`);
 				}
 				else {
+					input = [];
+
+					// Prepend rolling per-channel history (text-only, no image fidelity)
+					const buffered = getChannelHistory(channelId);
+					for (const turn of buffered) {
+						input.push({ role: turn.role, content: turn.content });
+					}
+					if (buffered.length > 0) {
+						logger.info(`Conversation history (channel buffer): ${buffered.length} messages`);
+					}
+
 					// Collect images from both the current message and the replied-to message
 					const refImages = referencedMessage ? extractImageUrls(referencedMessage) : [];
 					const userImages = extractImageUrls(message);
@@ -765,16 +791,14 @@ const messageEvent: MessageEvent = {
 						for (const url of allImages) {
 							parts.push({ type: 'input_image', image_url: url });
 						}
-						parts.push({ type: 'input_text', text: textPrompt });
+						parts.push({ type: 'input_text', text: wrappedUserText });
 						userContent = parts;
 					}
 					else {
-						userContent = textPrompt;
+						userContent = wrappedUserText;
 					}
 
-					input = [
-						{ role: 'user', content: userContent },
-					];
+					input.push({ role: 'user', content: userContent });
 				}
 
 				const guildId = message.guildId;
@@ -844,7 +868,7 @@ const messageEvent: MessageEvent = {
 
 			const _embed = getAiResponseEmbed(message.author, {
 				model: routedModel,
-				prompt: textPrompt,
+				prompt: userText,
 				response: completion,
 				inputTokens: 0,
 				outputTokens: 0,
@@ -868,8 +892,9 @@ const messageEvent: MessageEvent = {
 			sentIds.push(...toolEmbedIds);
 			cacheResponse(sentIds, completion);
 
-			// Async profile update — fire and forget, never blocks response
-			updateUserProfile(message.author.id, message.author.username, textPrompt + '\n' + completion, profileNotes);
+			// Append to per-channel rolling history for the next non-reply turn.
+			// The model tag drives sticky routing — Claude-rooted threads stay on Claude.
+			recordChannelTurns(channelId, wrappedUserText, wrapAssistant(completion), financial ? 'claude' : 'grok');
 
 			// Store for "delete" command
 			if (sentIds.length > 0) {
