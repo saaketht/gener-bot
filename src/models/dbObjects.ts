@@ -5,6 +5,7 @@ import { users } from './Users';
 import { trackedFlights } from './TrackedFlights';
 import { userProfiles } from './UserProfiles';
 import { watchedTickers } from './WatchedTickers';
+import { tetrisScores } from './TetrisScores';
 
 import { join } from 'path';
 
@@ -22,6 +23,7 @@ const Users = users(sequelize);
 const TrackedFlights = trackedFlights(sequelize);
 const UserProfiles = userProfiles(sequelize);
 const WatchedTickers = watchedTickers(sequelize);
+const TetrisScores = tetrisScores(sequelize);
 // auto-create missing tables and add new columns to existing tables at startup
 sequelize.sync({ alter: true }).then(() => {
 	// One-shot migration: collapse legacy 'etf' rows into 'stock' (idempotent).
@@ -63,4 +65,5 @@ export {
 	TrackedFlights,
 	UserProfiles,
 	WatchedTickers,
+	TetrisScores,
 };
