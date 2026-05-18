@@ -3,7 +3,7 @@ import { MessageEvent } from '../../types';
 import logger from '../../utils/logger';
 
 const ARCHIVE_URL = 'https://ix.cnn.io/data/truth-social/truth_archive.json';
-const CACHE_TTL = 5 * 60 * 1000;
+const CACHE_TTL = 30 * 60 * 1000;
 
 interface TruthPost {
 	id: string;
@@ -16,16 +16,22 @@ interface TruthPost {
 	favourites_count: number;
 }
 
-let cache: { posts: TruthPost[]; fetchedAt: number } | null = null;
+let cache: { posts: TruthPost[]; fetchedAt: number; etag: string } | null = null;
 
 async function fetchPosts(): Promise<TruthPost[]> {
 	if (cache && Date.now() - cache.fetchedAt < CACHE_TTL) {
 		return cache.posts;
 	}
-	const res = await fetch(ARCHIVE_URL);
+	const headers: Record<string, string> = {};
+	if (cache?.etag) headers['If-None-Match'] = cache.etag;
+	const res = await fetch(ARCHIVE_URL, { headers });
+	if (res.status === 304 && cache) {
+		cache.fetchedAt = Date.now();
+		return cache.posts;
+	}
 	if (!res.ok) throw new Error(`Truth Social archive returned ${res.status}`);
 	const posts: TruthPost[] = await res.json();
-	cache = { posts, fetchedAt: Date.now() };
+	cache = { posts, fetchedAt: Date.now(), etag: res.headers.get('etag') ?? '' };
 	return posts;
 }
 
@@ -53,7 +59,7 @@ function formatCount(n: number): string {
 
 function buildEmbed(post: TruthPost, index: number): EmbedBuilder {
 	const text = stripHtml(post.content);
-	const description = text || (post.media.length > 0 ? '*[Media]*' : '*[No content]*');
+	const description = text || '​';
 	const timestamp = new Date(post.created_at);
 	const stats = [
 		`❤️ ${formatCount(post.favourites_count)}`,
@@ -74,7 +80,7 @@ function buildEmbed(post: TruthPost, index: number): EmbedBuilder {
 		.setFooter({ text: `Truth #${index} · Truth Social` });
 
 	if (post.media.length > 0) {
-		embed.setImage(post.media[0]);
+		embed.setImage(post.media[0].replace('tmtg:', 'tmtg%3A'));
 	}
 
 	return embed;

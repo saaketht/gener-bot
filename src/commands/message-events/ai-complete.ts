@@ -888,7 +888,16 @@ const messageEvent: MessageEvent = {
 
 			// Send actual response and cache message IDs
 			const sentIds: string[] = [];
-			const lines = completion.split('\n').filter(line => line.trim() !== '');
+			const rawLines = completion.split('\n').map(l => l.trim()).filter(l => l !== '');
+			const lines: string[] = [];
+			for (const line of rawLines) {
+				if (lines.length > 0 && /^[.,;:!?)\]]/.test(line)) {
+					lines[lines.length - 1] += line;
+				}
+				else {
+					lines.push(line);
+				}
+			}
 			for (const line of lines) {
 				if (abortController.signal.aborted) break;
 				const chunks = chunkText(line);
