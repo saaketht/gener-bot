@@ -877,6 +877,8 @@ const messageEvent: MessageEvent = {
 				return;
 			}
 
+			completion = completion.replace(/<msg\s+from="[^"]*">/gi, '').replace(/<\/msg>/gi, '').trim();
+
 			const _embed = getAiResponseEmbed(message.author, {
 				model: routedModel,
 				prompt: userText,
