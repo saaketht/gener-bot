@@ -195,7 +195,43 @@ function looksLikeStock(symbol: string): boolean {
 	return true;
 }
 
+// 30s in-memory cache of full PriceData. Bypassed during pre/post sessions
+// where every print matters more — users querying AH usually care about the
+// most recent tick. Tradeoff: ~5% staleness vs ~90% fewer API calls on hot
+// tickers (multiple users typing $SPY within the window).
+interface CacheEntry { data: PriceData; ts: number }
+const priceCache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 30_000;
+const CACHE_MAX = 200;
+
+function readCache(key: string): PriceData | null {
+	const hit = priceCache.get(key);
+	if (!hit) return null;
+	if (Date.now() - hit.ts > CACHE_TTL_MS) {
+		priceCache.delete(key);
+		return null;
+	}
+	if (hit.data.session === 'pre' || hit.data.session === 'post') return null;
+	return hit.data;
+}
+
+function writeCache(key: string, data: PriceData) {
+	if (priceCache.size >= CACHE_MAX) {
+		const oldest = priceCache.keys().next().value;
+		if (oldest) priceCache.delete(oldest);
+	}
+	priceCache.set(key, { data, ts: Date.now() });
+}
+
+export function clearPriceCache() {
+	priceCache.clear();
+}
+
 export async function getPrice(symbol: string): Promise<PriceData | null> {
+	const key = symbol.toUpperCase();
+	const cached = readCache(key);
+	if (cached) return cached;
+
 	const [yahoo, fundamentals] = await Promise.all([
 		fetchYahoo(symbol),
 		looksLikeStock(symbol) ? fetchFinnhubMetrics(symbol) : Promise.resolve(null),
@@ -204,6 +240,7 @@ export async function getPrice(symbol: string): Promise<PriceData | null> {
 	if (!result) return null;
 	if (fundamentals?.market_cap) result.market_cap = fundamentals.market_cap;
 	if (fundamentals?.pe_ratio) result.pe_ratio = fundamentals.pe_ratio;
+	writeCache(key, result);
 	return result;
 }
 
