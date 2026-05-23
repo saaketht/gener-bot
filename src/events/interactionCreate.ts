@@ -159,6 +159,18 @@ const interactionCreateEvent = {
 			return;
 		}
 
+		if (interaction.isAutocomplete()) {
+			const command = client.commands.get(interaction.commandName);
+			if (!command?.autocomplete) return;
+			try {
+				await command.autocomplete(client, interaction);
+			}
+			catch (error) {
+				logger.warn(`autocomplete failed for ${interaction.commandName}`, { error });
+			}
+			return;
+		}
+
 		if (!interaction.isChatInputCommand()) return;
 		const command = client.commands.get(interaction.commandName);
 

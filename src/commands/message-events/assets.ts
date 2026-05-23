@@ -1,6 +1,8 @@
+import { EmbedBuilder, AttachmentBuilder } from 'discord.js';
 import { MessageEvent } from '../../types';
 import logger from '../../utils/logger';
 import { getAssetEmbed } from '../../embeds/asset-embeds';
+import { renderWatchlistCard } from '../../embeds/asset-watchlist';
 import { getAssetPrice, getPrice, toAssetType, PriceData, AssetType } from '../../utils/priceApi';
 import { WatchedTickers } from '../../models/dbObjects';
 
@@ -129,10 +131,32 @@ const messageEvent: MessageEvent = {
 					return price ? { resolved: r, price } : null;
 				}),
 			);
-			const built = results
-				.filter((r): r is { resolved: ResolvedTicker; price: PriceData } => r !== null)
-				.map(r => getAssetEmbed(r.price, r.resolved.type, r.resolved.name));
-			if (!built.length) return;
+			const successful = results.filter(
+				(r): r is { resolved: ResolvedTicker; price: PriceData } => r !== null,
+			);
+			if (!successful.length) return;
+
+			// 2+ tickers collapse into a single watchlist card so we don't flood
+			// the channel with 4 stacked 800x400 PNGs.
+			if (successful.length >= 2) {
+				const watchlist = renderWatchlistCard(successful.map(r => ({
+					price: r.price,
+					type: r.resolved.type,
+					displayName: r.resolved.name,
+				})));
+				if (watchlist) {
+					const embed = new EmbedBuilder()
+						.setColor(0x2B2D31)
+						.setImage('attachment://watchlist.png')
+						.setFooter({ text: `${successful.length} tickers  •  yahoo` })
+						.setTimestamp();
+					const file = new AttachmentBuilder(watchlist, { name: 'watchlist.png' });
+					await message.reply({ embeds: [embed], files: [file] });
+					return;
+				}
+			}
+
+			const built = successful.map(r => getAssetEmbed(r.price, r.resolved.type, r.resolved.name));
 			await message.reply({
 				embeds: built.map(b => b.embed),
 				files: built.flatMap(b => b.files),

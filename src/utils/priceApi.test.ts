@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { normalizeSymbol, toAssetType, getPrice, getAssetPrice } from './priceApi';
+import { normalizeSymbol, toAssetType, getPrice, getAssetPrice, clearPriceCache } from './priceApi';
 
 // --- normalizeSymbol ---
 
@@ -126,6 +126,7 @@ beforeEach(() => {
 	vi.unstubAllGlobals();
 	vi.useFakeTimers();
 	vi.setSystemTime(new Date(REGULAR_NOW * 1000));
+	clearPriceCache();
 	process.env.FINNHUB_API_KEY = 'test-key';
 });
 
@@ -189,6 +190,42 @@ describe('getPrice', () => {
 		expect(result).not.toBeNull();
 		expect(result!.market_cap).toBeUndefined();
 		expect(result!.pe_ratio).toBeUndefined();
+	});
+
+	it('serves second call within TTL from cache without re-fetching', async () => {
+		const fetchMock = makeFetch(null, yahooResponse);
+		vi.stubGlobal('fetch', fetchMock);
+		await getPrice('SPY');
+		const firstCallCount = fetchMock.mock.calls.length;
+		await getPrice('SPY');
+		expect(fetchMock.mock.calls.length).toBe(firstCallCount);
+	});
+
+	it('refetches after TTL expires', async () => {
+		const fetchMock = makeFetch(null, yahooResponse);
+		vi.stubGlobal('fetch', fetchMock);
+		await getPrice('SPY');
+		const firstCallCount = fetchMock.mock.calls.length;
+		vi.setSystemTime(new Date(REGULAR_NOW * 1000 + 31_000));
+		await getPrice('SPY');
+		expect(fetchMock.mock.calls.length).toBeGreaterThan(firstCallCount);
+	});
+
+	it('bypasses cache when cached entry is from an extended-hours session', async () => {
+		vi.setSystemTime(new Date((REG_END + 600) * 1000));
+		const postResponse = {
+			chart: { result: [{
+				meta: { ...yahooMeta, postMarketPrice: 600.10 },
+				timestamp: [REG_START],
+				indicators: { quote: [{ close: [593.25] }] },
+			}] },
+		};
+		const fetchMock = makeFetch(null, postResponse);
+		vi.stubGlobal('fetch', fetchMock);
+		await getPrice('SPY');
+		const firstCallCount = fetchMock.mock.calls.length;
+		await getPrice('SPY');
+		expect(fetchMock.mock.calls.length).toBeGreaterThan(firstCallCount);
 	});
 
 	it('attaches intraday series when timestamps and closes are present', async () => {

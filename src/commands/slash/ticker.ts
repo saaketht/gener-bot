@@ -1,5 +1,7 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from 'discord.js';
+import { AutocompleteInteraction, ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from 'discord.js';
+import { Op } from 'sequelize';
 import { Command } from '../../types';
+import logger from '../../utils/logger';
 import { WatchedTickers } from '../../models/dbObjects';
 
 const DEFAULT_TICKERS = [
@@ -51,7 +53,8 @@ const tickerCommand: Command = {
 				.addStringOption(opt =>
 					opt.setName('symbol')
 						.setDescription('Ticker symbol (e.g. AAPL, BTC, NVDA)')
-						.setRequired(true))
+						.setRequired(true)
+						.setAutocomplete(true))
 				.addStringOption(opt =>
 					opt.setName('name')
 						.setDescription('Friendly name (e.g. Apple Inc.)')
@@ -72,7 +75,8 @@ const tickerCommand: Command = {
 				.addStringOption(opt =>
 					opt.setName('symbol')
 						.setDescription('Ticker symbol to remove')
-						.setRequired(true)),
+						.setRequired(true)
+						.setAutocomplete(true)),
 		)
 		.addSubcommand(sub =>
 			sub.setName('list')
@@ -89,7 +93,79 @@ const tickerCommand: Command = {
 		else if (sub === 'remove') await handleRemove(interaction, guildId);
 		else if (sub === 'list') await handleList(interaction, guildId);
 	},
+
+	async autocomplete(_client, interaction: AutocompleteInteraction) {
+		const sub = interaction.options.getSubcommand();
+		const focused = interaction.options.getFocused(true);
+		if (focused.name !== 'symbol') return;
+		const query = focused.value.toString().trim();
+
+		if (sub === 'add') {
+			const choices = await searchYahooSymbols(query);
+			await interaction.respond(choices.slice(0, 25));
+		}
+		else if (sub === 'remove') {
+			const choices = await suggestTrackedSymbols(interaction.guildId!, query);
+			await interaction.respond(choices.slice(0, 25));
+		}
+	},
 };
+
+interface YahooSearchQuote {
+	symbol?: string;
+	shortname?: string;
+	longname?: string;
+	quoteType?: string;
+	exchange?: string;
+}
+
+async function searchYahooSymbols(query: string): Promise<Array<{ name: string; value: string }>> {
+	if (!query) return [];
+	try {
+		const res = await fetch(
+			`https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=15&newsCount=0`,
+			{ headers: { 'User-Agent': 'Mozilla/5.0' } },
+		);
+		if (!res.ok) return [];
+		const data = await res.json();
+		const quotes: YahooSearchQuote[] = data?.quotes ?? [];
+		return quotes
+			.filter(q => q.symbol && (q.shortname || q.longname))
+			.map(q => {
+				const name = q.shortname ?? q.longname ?? '';
+				const display = truncate(`${q.symbol} — ${name}`, 100);
+				return { name: display, value: q.symbol!.slice(0, 100) };
+			});
+	}
+	catch (e) {
+		logger.warn(`Yahoo search failed for "${query}":`, e);
+		return [];
+	}
+}
+
+async function suggestTrackedSymbols(guildId: string, query: string): Promise<Array<{ name: string; value: string }>> {
+	const where: any = { guild_id: guildId };
+	if (query) {
+		const upper = query.toUpperCase();
+		where[Op.or] = [
+			{ symbol: { [Op.like]: `${upper}%` } },
+			{ name: { [Op.like]: `%${query}%` } },
+		];
+	}
+	const rows: any[] = await WatchedTickers.findAll({
+		where,
+		order: [['symbol', 'ASC']],
+		limit: 25,
+	});
+	return rows.map(r => ({
+		name: truncate(r.name ? `${r.symbol} — ${r.name}` : r.symbol, 100),
+		value: r.symbol.slice(0, 100),
+	}));
+}
+
+function truncate(s: string, max: number): string {
+	return s.length <= max ? s : s.slice(0, max - 1) + '…';
+}
 
 async function handleAdd(interaction: ChatInputCommandInteraction, guildId: string) {
 	const symbol = interaction.options.getString('symbol', true).toUpperCase().trim();
