@@ -84,7 +84,10 @@ async function fetchYahoo(symbol: string): Promise<PriceData | null> {
 		const meta = result?.meta;
 		const regular = meta?.regularMarketPrice;
 		const prevClose = meta?.chartPreviousClose ?? meta?.previousClose;
-		if (!regular || !prevClose) return null;
+		if (!regular || !prevClose) {
+			logger.warn(`Yahoo chart ${symbol} missing required fields (regularMarketPrice=${regular}, prevClose=${prevClose}) — schema may have changed`);
+			return null;
+		}
 
 		const pre = meta.preMarketPrice && meta.preMarketPrice > 0 ? meta.preMarketPrice : undefined;
 		const post = meta.postMarketPrice && meta.postMarketPrice > 0 ? meta.postMarketPrice : undefined;
@@ -128,6 +131,9 @@ async function fetchYahoo(symbol: string): Promise<PriceData | null> {
 				regular_start: reg.start,
 				regular_end: reg.end,
 			};
+		}
+		else {
+			logger.warn(`Yahoo chart ${symbol} returned no intraday series (timestamps=${!!timestamps}, closes=${!!closes}, currentTradingPeriod=${!!reg}) — falling back to text-only embed`);
 		}
 
 		// Yahoo's chart endpoint doesn't expose regularMarketOpen on the meta object
