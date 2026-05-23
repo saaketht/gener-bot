@@ -1,5 +1,12 @@
-import { createCanvas } from '@napi-rs/canvas';
+import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
+import * as path from 'path';
 import { PriceData, AssetType, IntradaySeries, Session } from '../utils/priceApi';
+
+// Register Inter so rendering is consistent across hosts. Without this canvas
+// falls back to whatever sans-serif the OS happens to have (DejaVu on Debian)
+// and the result looks visibly off.
+GlobalFonts.registerFromPath(path.join(__dirname, 'fonts/Inter-Regular.ttf'), 'Inter');
+GlobalFonts.registerFromPath(path.join(__dirname, 'fonts/Inter-Bold.ttf'), 'Inter');
 
 const W = 800;
 const H = 400;
@@ -86,12 +93,12 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 	const company = displayName ?? price.name;
 	if (company) {
 		ctx.fillStyle = COLORS.dim;
-		ctx.font = '13px sans-serif';
+		ctx.font = '13px Inter';
 		ctx.fillText(company.toUpperCase(), 28, 30);
 	}
 
 	ctx.fillStyle = COLORS.text;
-	ctx.font = 'bold 34px sans-serif';
+	ctx.font = 'bold 34px Inter';
 	ctx.fillText(price.symbol, 28, 64);
 	const tickerW = ctx.measureText(price.symbol).width;
 
@@ -106,7 +113,7 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 		ctx.fillStyle = 'rgba(155,161,168,0.25)';
 		ctx.fillRect(tagX, 40, 38, 22);
 		ctx.fillStyle = COLORS.dim;
-		ctx.font = 'bold 12px sans-serif';
+		ctx.font = 'bold 12px Inter';
 		ctx.fillText(sessionLabel, tagX + (38 - ctx.measureText(sessionLabel).width) / 2, 56);
 	}
 
@@ -118,7 +125,7 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 	const regArrow = regChange >= 0 ? '▲' : '▼';
 	const regSign = regChange >= 0 ? '+' : '-';
 	ctx.fillStyle = regChange >= 0 ? palette.line : TYPE_PALETTE[type].down.line;
-	ctx.font = '18px sans-serif';
+	ctx.font = '18px Inter';
 	ctx.fillText(
 		`${regArrow} ${regSign}$${fmt(Math.abs(regChange))}  (${regSign}${Math.abs(regPct).toFixed(2)}%)`,
 		28, 92,
@@ -133,7 +140,7 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 		const extSign = extChange >= 0 ? '+' : '-';
 		const label = price.session === 'post' ? 'after hours' : 'pre-market';
 		ctx.fillStyle = COLORS.dim;
-		ctx.font = '13px sans-serif';
+		ctx.font = '13px Inter';
 		ctx.fillText(
 			`${label}  ${extSign}$${fmt(Math.abs(extChange))} (${extSign}${Math.abs(extPct).toFixed(2)}%)`,
 			28, 112,
@@ -158,7 +165,7 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 	const statsLeft = statsRight - 170;
 	const statRowH = 20;
 	const statsTop = 38;
-	ctx.font = '13px sans-serif';
+	ctx.font = '13px Inter';
 	for (let i = 0; i < stats.length; i++) {
 		const y = statsTop + i * statRowH;
 		ctx.textAlign = 'left';
@@ -234,7 +241,7 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 	hLine(py);
 	ctx.setLineDash([]);
 	ctx.fillStyle = COLORS.dim;
-	ctx.font = '11px sans-serif';
+	ctx.font = '11px Inter';
 	ctx.fillText(`prev $${fmtPrice(price.prev_close)}`, chartX + 6, py - 4);
 
 	// Split series into pre / regular / post slices for differentiated styling
@@ -291,7 +298,7 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 	// Day & 52wk range tracks
 	function drawRangeBar(label: string, lo: number, hi: number, cur: number, y: number) {
 		ctx.fillStyle = COLORS.dim;
-		ctx.font = '12px sans-serif';
+		ctx.font = '12px Inter';
 		ctx.fillText(label, chartX, y - 6);
 		ctx.textAlign = 'right';
 		ctx.fillText(`$${fmtPrice(lo)}  —  $${fmtPrice(hi)}`, chartX + chartW, y - 6);
