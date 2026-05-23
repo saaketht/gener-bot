@@ -45,6 +45,15 @@ function fmtPrice(v: number): string {
 	return v >= 1 ? fmt(v, 2) : v.toFixed(4);
 }
 
+function fmtCompact(v: number): string {
+	const abs = Math.abs(v);
+	if (abs >= 1e12) return `${(v / 1e12).toFixed(2)}T`;
+	if (abs >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
+	if (abs >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+	if (abs >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
+	return v.toFixed(0);
+}
+
 interface CleanedPoint {
 	t: number;
 	price: number;
@@ -131,14 +140,31 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 		);
 	}
 
-	// Right-side mini stats
+	// Right-side stat grid: up to 4 cells in a 2x2 layout
+	const stats: Array<{ label: string; value: string }> = [
+		{ label: 'PREV CLOSE', value: `$${fmtPrice(price.prev_close)}` },
+	];
+	if (price.open) stats.push({ label: 'OPEN', value: `$${fmtPrice(price.open)}` });
+	if (price.volume) stats.push({ label: 'VOLUME', value: fmtCompact(price.volume) });
+	if (price.market_cap) stats.push({ label: 'MKT CAP', value: `$${fmtCompact(price.market_cap)}` });
+	if (price.pe_ratio) stats.push({ label: 'P/E', value: price.pe_ratio.toFixed(1) });
+
+	// 2x2 right-anchored grid. Fill order: top-right, top-left, bot-right, bot-left
+	// so the most important stat (prev close) lands in the eye's first position.
+	const colW = 110;
+	const rowY = [50, 88];
 	ctx.textAlign = 'right';
-	ctx.fillStyle = COLORS.dim;
-	ctx.font = '13px sans-serif';
-	ctx.fillText('PREV CLOSE', W - 28, 50);
-	ctx.fillStyle = COLORS.text;
-	ctx.font = '16px sans-serif';
-	ctx.fillText(`$${fmtPrice(price.prev_close)}`, W - 28, 72);
+	for (let i = 0; i < Math.min(stats.length, 4); i++) {
+		const row = i < 2 ? 0 : 1;
+		const col = i % 2;
+		const x = W - 28 - col * colW;
+		ctx.fillStyle = COLORS.dim;
+		ctx.font = '12px sans-serif';
+		ctx.fillText(stats[i].label, x, rowY[row]);
+		ctx.fillStyle = COLORS.text;
+		ctx.font = '15px sans-serif';
+		ctx.fillText(stats[i].value, x, rowY[row] + 19);
+	}
 	ctx.textAlign = 'left';
 
 	// Chart panel

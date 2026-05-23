@@ -74,6 +74,8 @@ const yahooMeta = {
 	chartPreviousClose: 589.0,
 	regularMarketDayHigh: 595.5,
 	regularMarketDayLow: 588.0,
+	regularMarketOpen: 590.10,
+	regularMarketVolume: 42_500_000,
 	fiftyTwoWeekHigh: 613.23,
 	fiftyTwoWeekLow: 490.68,
 	longName: 'SPDR S&P 500 ETF Trust',
@@ -94,8 +96,19 @@ const yahooResponse = {
 	},
 };
 
-function makeFetch(finnhub: object | null, yahoo: object | null) {
+const finnhubMetricResponse = {
+	metric: {
+		marketCapitalization: 542000, // millions USD → $542B
+		peBasicExclExtraTTM: 28.5,
+	},
+};
+
+function makeFetch(finnhub: object | null, yahoo: object | null, finnhubMetric: object | null = finnhubMetricResponse) {
 	return vi.fn().mockImplementation((url: string) => {
+		if (url.includes('finnhub.io/api/v1/stock/metric')) {
+			if (!finnhubMetric) return Promise.resolve({ ok: false, status: 500 });
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(finnhubMetric) });
+		}
 		if (url.includes('finnhub.io')) {
 			if (!finnhub) return Promise.resolve({ ok: false, status: 500 });
 			return Promise.resolve({ ok: true, json: () => Promise.resolve(finnhub) });
@@ -126,6 +139,31 @@ describe('getPrice', () => {
 		expect(result!.week52_high).toBe(613.23);
 		expect(result!.week52_low).toBe(490.68);
 		expect(result!.session).toBe('regular');
+	});
+
+	it('surfaces open, volume, market_cap, and pe_ratio for stocks', async () => {
+		vi.stubGlobal('fetch', makeFetch(finnhubResponse, yahooResponse));
+		const result = await getPrice('SPY');
+		expect(result!.open).toBe(590.10);
+		expect(result!.volume).toBe(42_500_000);
+		expect(result!.market_cap).toBe(542_000 * 1e6);
+		expect(result!.pe_ratio).toBe(28.5);
+	});
+
+	it('skips Finnhub metric fetch for crypto symbols', async () => {
+		const fetchMock = makeFetch(null, yahooResponse);
+		vi.stubGlobal('fetch', fetchMock);
+		await getPrice('BTC-USD');
+		const urls = fetchMock.mock.calls.map((c: unknown[]) => c[0] as string);
+		expect(urls.some(u => u.includes('stock/metric'))).toBe(false);
+	});
+
+	it('still returns price data when Finnhub metric call fails', async () => {
+		vi.stubGlobal('fetch', makeFetch(null, yahooResponse, null));
+		const result = await getPrice('SPY');
+		expect(result).not.toBeNull();
+		expect(result!.market_cap).toBeUndefined();
+		expect(result!.pe_ratio).toBeUndefined();
 	});
 
 	it('attaches intraday series when timestamps and closes are present', async () => {

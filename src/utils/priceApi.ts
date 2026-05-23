@@ -17,6 +17,8 @@ export interface PriceData {
 	change_pct: number;
 	high: number;
 	low: number;
+	open?: number;
+	volume?: number;
 	prev_close: number;
 	week52_high?: number;
 	week52_low?: number;
@@ -25,6 +27,8 @@ export interface PriceData {
 	regular_close?: number;
 	session?: Session;
 	intraday?: IntradaySeries;
+	market_cap?: number;
+	pe_ratio?: number;
 	source: string;
 }
 
@@ -108,6 +112,8 @@ async function fetchYahoo(symbol: string): Promise<PriceData | null> {
 
 		const displayName = meta.longName ?? meta.shortName;
 		if (displayName) out.name = displayName;
+		if (meta.regularMarketOpen) out.open = meta.regularMarketOpen;
+		if (meta.regularMarketVolume) out.volume = meta.regularMarketVolume;
 		if (meta.fiftyTwoWeekHigh) out.week52_high = meta.fiftyTwoWeekHigh;
 		if (meta.fiftyTwoWeekLow) out.week52_low = meta.fiftyTwoWeekLow;
 		if (pre) out.pre_market_price = pre;
@@ -133,10 +139,55 @@ async function fetchYahoo(symbol: string): Promise<PriceData | null> {
 	}
 }
 
+interface Fundamentals {
+	market_cap?: number;
+	pe_ratio?: number;
+}
+
+async function fetchFinnhubMetrics(symbol: string): Promise<Fundamentals | null> {
+	const key = process.env.FINNHUB_API_KEY;
+	if (!key) return null;
+
+	try {
+		const res = await fetch(
+			`https://finnhub.io/api/v1/stock/metric?symbol=${encodeURIComponent(symbol.toUpperCase())}&metric=all&token=${key}`,
+		);
+		if (!res.ok) return null;
+		const data = await res.json();
+		const m = data?.metric;
+		if (!m) return null;
+		const out: Fundamentals = {};
+		// Finnhub reports marketCapitalization in millions of USD
+		if (typeof m.marketCapitalization === 'number' && m.marketCapitalization > 0) {
+			out.market_cap = m.marketCapitalization * 1e6;
+		}
+		const pe = m.peBasicExclExtraTTM ?? m.peTTM ?? m.peNormalizedAnnual;
+		if (typeof pe === 'number' && isFinite(pe) && pe > 0) out.pe_ratio = pe;
+		return out;
+	}
+	catch (e) {
+		logger.warn(`Finnhub metric fetch failed for ${symbol}:`, e);
+		return null;
+	}
+}
+
+function looksLikeStock(symbol: string): boolean {
+	const up = symbol.toUpperCase();
+	if (up.endsWith('-USD')) return false;
+	if (up.endsWith('=F')) return false;
+	return true;
+}
+
 export async function getPrice(symbol: string): Promise<PriceData | null> {
-	const yahoo = await fetchYahoo(symbol);
-	if (yahoo) return yahoo;
-	return fetchFinnhub(symbol);
+	const [yahoo, fundamentals] = await Promise.all([
+		fetchYahoo(symbol),
+		looksLikeStock(symbol) ? fetchFinnhubMetrics(symbol) : Promise.resolve(null),
+	]);
+	const result = yahoo ?? await fetchFinnhub(symbol);
+	if (!result) return null;
+	if (fundamentals?.market_cap) result.market_cap = fundamentals.market_cap;
+	if (fundamentals?.pe_ratio) result.pe_ratio = fundamentals.pe_ratio;
+	return result;
 }
 
 export type AssetType = 'stock' | 'crypto' | 'commodity';
