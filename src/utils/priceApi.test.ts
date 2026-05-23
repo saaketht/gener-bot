@@ -63,7 +63,7 @@ const finnhubResponse = {
 
 // Fixed clock so deriveSession() produces deterministic results — pick a time
 // well inside US regular hours on a weekday.
-const REGULAR_NOW = Date.UTC(2025, 0, 6, 18, 0, 0) / 1000; // Mon Jan 6 2025 18:00 UTC = 13:00 ET
+const REGULAR_NOW = Date.UTC(2025, 0, 6, 18, 0, 0) / 1000;
 const REG_START = Date.UTC(2025, 0, 6, 14, 30, 0) / 1000;
 const REG_END = Date.UTC(2025, 0, 6, 21, 0, 0) / 1000;
 const PRE_START = Date.UTC(2025, 0, 6, 9, 0, 0) / 1000;
@@ -98,7 +98,8 @@ const yahooResponse = {
 
 const finnhubMetricResponse = {
 	metric: {
-		marketCapitalization: 542000, // millions USD → $542B
+		// marketCapitalization is in millions USD: 542000 → $542B
+		marketCapitalization: 542000,
 		peBasicExclExtraTTM: 28.5,
 	},
 };
