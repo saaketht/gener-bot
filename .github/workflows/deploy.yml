@@ -2,7 +2,9 @@ name: Deploy
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'claude/**'
 
 jobs:
   check:
@@ -19,6 +21,7 @@ jobs:
 
   deploy:
     needs: check
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to VPS
