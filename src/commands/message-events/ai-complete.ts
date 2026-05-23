@@ -292,7 +292,11 @@ const toolHandlers: Record<string, ToolHandler> = {
 			const sent = await ctx.message.channel.send({ embeds: [embed], files });
 			ctx.sentEmbedIds.push(sent.id);
 		}
-		return JSON.stringify({ ...priceData, tracked: !!ticker, embed_sent: showEmbed });
+		// Strip the intraday series before returning to the model — it's ~300
+		// floats the LLM can't meaningfully reason over, and it costs ~2k tokens
+		// per call.
+		const { intraday: _intraday, ...modelView } = priceData;
+		return JSON.stringify({ ...modelView, tracked: !!ticker, embed_sent: showEmbed });
 	},
 
 	async get_trades(input, ctx) {
