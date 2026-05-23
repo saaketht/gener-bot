@@ -288,8 +288,8 @@ const toolHandlers: Record<string, ToolHandler> = {
 			: await getPrice(sym.toUpperCase());
 		if (!priceData) return JSON.stringify({ found: false, message: `no price data available for ${sym.toUpperCase()}` });
 		if (showEmbed && ctx.message.channel.isSendable()) {
-			const embed = getAssetEmbed(priceData, type, ticker?.name ?? undefined);
-			const sent = await ctx.message.channel.send({ embeds: [embed] });
+			const { embed, files } = getAssetEmbed(priceData, type, ticker?.name ?? undefined);
+			const sent = await ctx.message.channel.send({ embeds: [embed], files });
 			ctx.sentEmbedIds.push(sent.id);
 		}
 		return JSON.stringify({ ...priceData, tracked: !!ticker, embed_sent: showEmbed });

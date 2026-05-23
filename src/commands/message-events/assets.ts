@@ -129,11 +129,14 @@ const messageEvent: MessageEvent = {
 					return price ? { resolved: r, price } : null;
 				}),
 			);
-			const embeds = results
+			const built = results
 				.filter((r): r is { resolved: ResolvedTicker; price: PriceData } => r !== null)
 				.map(r => getAssetEmbed(r.price, r.resolved.type, r.resolved.name));
-			if (!embeds.length) return;
-			await message.reply({ embeds });
+			if (!built.length) return;
+			await message.reply({
+				embeds: built.map(b => b.embed),
+				files: built.flatMap(b => b.files),
+			});
 		}
 		catch (error) {
 			logger.error('asset lookup error:', error);
