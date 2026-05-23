@@ -115,23 +115,12 @@ function drawRow(ctx: any, item: WatchlistItem, top: number, idx: number) {
 
 	// Day range mini-bar (col 1, bottom row)
 	if (price.high > price.low) {
-		const barX = PAD_X + 8;
-		const barY = rowInner + 60;
-		const barW = 160;
-		const barH = 5;
-		ctx.fillStyle = COLORS.track;
-		ctx.fillRect(barX, barY, barW, barH);
-		const pos = Math.max(0, Math.min(1, (price.price - price.low) / (price.high - price.low))) * barW;
-		ctx.fillStyle = palette.line;
-		ctx.fillRect(barX, barY, pos, barH);
-		ctx.fillStyle = '#FFFFFF';
-		ctx.fillRect(barX + pos - 1.5, barY - 2, 3, barH + 4);
-		ctx.fillStyle = COLORS.dim;
-		ctx.font = '10px Inter';
-		ctx.fillText(`$${fmtPrice(price.low)}`, barX, barY + 17);
-		ctx.textAlign = 'right';
-		ctx.fillText(`$${fmtPrice(price.high)}`, barX + barW, barY + 17);
-		ctx.textAlign = 'left';
+		drawMiniRange(ctx, 'DAY', price.low, price.high, price.price, palette.line, PAD_X + 8, rowInner + 60, 160);
+	}
+
+	// 52-week range mini-bar (col 2, bottom row, under price/change)
+	if (price.week52_high && price.week52_low && price.week52_high > price.week52_low) {
+		drawMiniRange(ctx, '52W', price.week52_low, price.week52_high, price.price, palette.line, PAD_X + 230, rowInner + 60, 160);
 	}
 
 	// Column 2: price + change
@@ -154,6 +143,26 @@ function drawRow(ctx: any, item: WatchlistItem, top: number, idx: number) {
 	const sparkY = rowInner + 4;
 	const sparkH = ROW_H - 20;
 	drawSparkline(ctx, price, palette, sparkX, sparkY, sparkW, sparkH);
+}
+
+function drawMiniRange(ctx: any, label: string, lo: number, hi: number, cur: number, color: string, x: number, y: number, w: number) {
+	const h = 5;
+	ctx.fillStyle = COLORS.dim;
+	ctx.font = '9px Inter';
+	ctx.fillText(label, x, y - 4);
+	ctx.fillStyle = COLORS.track;
+	ctx.fillRect(x, y, w, h);
+	const pos = Math.max(0, Math.min(1, (cur - lo) / (hi - lo))) * w;
+	ctx.fillStyle = color;
+	ctx.fillRect(x, y, pos, h);
+	ctx.fillStyle = '#FFFFFF';
+	ctx.fillRect(x + pos - 1.5, y - 2, 3, h + 4);
+	ctx.fillStyle = COLORS.dim;
+	ctx.font = '10px Inter';
+	ctx.fillText(`$${fmtPrice(lo)}`, x, y + 17);
+	ctx.textAlign = 'right';
+	ctx.fillText(`$${fmtPrice(hi)}`, x + w, y + 17);
+	ctx.textAlign = 'left';
 }
 
 function drawSparkline(ctx: any, price: PriceData, palette: UpDown, x: number, y: number, w: number, h: number) {
