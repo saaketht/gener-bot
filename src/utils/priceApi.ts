@@ -112,7 +112,6 @@ async function fetchYahoo(symbol: string): Promise<PriceData | null> {
 
 		const displayName = meta.longName ?? meta.shortName;
 		if (displayName) out.name = displayName;
-		if (meta.regularMarketOpen) out.open = meta.regularMarketOpen;
 		if (meta.regularMarketVolume) out.volume = meta.regularMarketVolume;
 		if (meta.fiftyTwoWeekHigh) out.week52_high = meta.fiftyTwoWeekHigh;
 		if (meta.fiftyTwoWeekLow) out.week52_low = meta.fiftyTwoWeekLow;
@@ -129,6 +128,18 @@ async function fetchYahoo(symbol: string): Promise<PriceData | null> {
 				regular_start: reg.start,
 				regular_end: reg.end,
 			};
+		}
+
+		// Yahoo's chart endpoint doesn't expose regularMarketOpen on the meta object
+		// (it lives on the v7 quote endpoint, which 401s without auth). Derive it
+		// from the first regular-session intraday bar.
+		if (meta.regularMarketOpen) {
+			out.open = meta.regularMarketOpen;
+		}
+		else if (out.intraday) {
+			const idx = out.intraday.timestamps.findIndex(t => t >= out.intraday!.regular_start);
+			const firstClose = idx >= 0 ? out.intraday.closes[idx] : null;
+			if (firstClose != null) out.open = firstClose;
 		}
 
 		return out;
@@ -162,7 +173,7 @@ async function fetchFinnhubMetrics(symbol: string): Promise<Fundamentals | null>
 			out.market_cap = m.marketCapitalization * 1e6;
 		}
 		const pe = m.peBasicExclExtraTTM ?? m.peTTM ?? m.peNormalizedAnnual;
-		if (typeof pe === 'number' && isFinite(pe) && pe > 0) out.pe_ratio = pe;
+		if (typeof pe === 'number' && isFinite(pe)) out.pe_ratio = pe;
 		return out;
 	}
 	catch (e) {

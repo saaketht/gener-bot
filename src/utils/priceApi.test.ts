@@ -151,6 +151,30 @@ describe('getPrice', () => {
 		expect(result!.pe_ratio).toBe(28.5);
 	});
 
+	it('derives open from first regular-session bar when meta.regularMarketOpen is missing', async () => {
+		const noOpenMeta = { ...yahooMeta };
+		delete (noOpenMeta as any).regularMarketOpen;
+		const response = {
+			chart: { result: [{
+				meta: noOpenMeta,
+				timestamp: [REG_START - 600, REG_START, REG_START + 300, REG_START + 600],
+				indicators: { quote: [{ close: [580.5, 591.2, 592.5, 593.25] }] },
+			}] },
+		};
+		vi.stubGlobal('fetch', makeFetch(null, response));
+		const result = await getPrice('SPY');
+		expect(result!.open).toBe(591.2);
+	});
+
+	it('surfaces negative P/E rather than dropping it', async () => {
+		const negPeResponse = {
+			metric: { marketCapitalization: 5000, peBasicExclExtraTTM: -42.3 },
+		};
+		vi.stubGlobal('fetch', makeFetch(null, yahooResponse, negPeResponse));
+		const result = await getPrice('SPY');
+		expect(result!.pe_ratio).toBe(-42.3);
+	});
+
 	it('skips Finnhub metric fetch for crypto symbols', async () => {
 		const fetchMock = makeFetch(null, yahooResponse);
 		vi.stubGlobal('fetch', fetchMock);

@@ -7,7 +7,7 @@
     "lint": "eslint --ext .ts .",
     "deploy-commands": "ts-node src/deploy-commands.ts",
     "deploy": "ts-node src/deploy-commands.ts",
-    "build": "tsc --skipLibCheck",
+    "build": "tsc --skipLibCheck && mkdir -p built/src/embeds/fonts && cp src/embeds/fonts/*.ttf built/src/embeds/fonts/",
     "dev": "nodemon src/index.ts",
     "start": "ts-node src/index.ts",
     "test": "vitest run",
