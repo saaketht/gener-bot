@@ -2,7 +2,7 @@ import { createCanvas } from '@napi-rs/canvas';
 import { PriceData, AssetType, IntradaySeries, Session } from '../utils/priceApi';
 
 const W = 800;
-const H = 360;
+const H = 400;
 
 const COLORS = {
 	bg: '#2B2D31',
@@ -140,30 +140,33 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 		);
 	}
 
-	// Right-side stat grid: up to 4 cells in a 2x2 layout
+	// Right-side stat list: label left-aligned, value right-aligned, one per row.
+	// Negative P/E is meaningful (unprofitable company) so render it with a sign
+	// rather than dropping it.
 	const stats: Array<{ label: string; value: string }> = [
 		{ label: 'PREV CLOSE', value: `$${fmtPrice(price.prev_close)}` },
 	];
 	if (price.open) stats.push({ label: 'OPEN', value: `$${fmtPrice(price.open)}` });
 	if (price.volume) stats.push({ label: 'VOLUME', value: fmtCompact(price.volume) });
 	if (price.market_cap) stats.push({ label: 'MKT CAP', value: `$${fmtCompact(price.market_cap)}` });
-	if (price.pe_ratio) stats.push({ label: 'P/E', value: price.pe_ratio.toFixed(1) });
+	if (typeof price.pe_ratio === 'number') {
+		const sign = price.pe_ratio < 0 ? '−' : '';
+		stats.push({ label: 'P/E', value: `${sign}${Math.abs(price.pe_ratio).toFixed(1)}` });
+	}
 
-	// 2x2 right-anchored grid. Fill order: top-right, top-left, bot-right, bot-left
-	// so the most important stat (prev close) lands in the eye's first position.
-	const colW = 110;
-	const rowY = [50, 88];
-	ctx.textAlign = 'right';
-	for (let i = 0; i < Math.min(stats.length, 4); i++) {
-		const row = i < 2 ? 0 : 1;
-		const col = i % 2;
-		const x = W - 28 - col * colW;
+	const statsRight = W - 28;
+	const statsLeft = statsRight - 170;
+	const statRowH = 20;
+	const statsTop = 38;
+	ctx.font = '13px sans-serif';
+	for (let i = 0; i < stats.length; i++) {
+		const y = statsTop + i * statRowH;
+		ctx.textAlign = 'left';
 		ctx.fillStyle = COLORS.dim;
-		ctx.font = '12px sans-serif';
-		ctx.fillText(stats[i].label, x, rowY[row]);
+		ctx.fillText(stats[i].label, statsLeft, y);
+		ctx.textAlign = 'right';
 		ctx.fillStyle = COLORS.text;
-		ctx.font = '15px sans-serif';
-		ctx.fillText(stats[i].value, x, rowY[row] + 19);
+		ctx.fillText(stats[i].value, statsRight, y);
 	}
 	ctx.textAlign = 'left';
 
