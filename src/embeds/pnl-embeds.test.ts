@@ -9,6 +9,9 @@ import {
 	sortTrades,
 	buildTradeBlock,
 	buildWinBar,
+	buildLegs,
+	fmtHold,
+	thetaBand,
 	Trade,
 } from './pnl-embeds';
 
@@ -34,8 +37,16 @@ describe('parseTradesCSV', () => {
 		expect(t.entryCost).toBe(-300);
 		expect(t.exitCredit).toBe(450);
 		expect(t.pnl).toBe(150);
+		expect(t.cumulativePnl).toBe(150);
 		expect(t.isWin).toBe(true);
 		expect(t.groupId).toBe('G225');
+	});
+
+	it('parses cumulativePnl across rows', () => {
+		const trades = parseTradesCSV(SAMPLE_CSV);
+		expect(trades[0].cumulativePnl).toBe(150);
+		expect(trades[1].cumulativePnl).toBe(52);
+		expect(trades[2].cumulativePnl).toBe(100);
 	});
 
 	it('returns empty for header-only CSV', () => {
@@ -153,27 +164,27 @@ describe('getPnlEmbed', () => {
 	const trades = parseTradesCSV(SAMPLE_CSV).filter(t => t.date === '3/23/2026');
 
 	it('sets green color for positive P/L', () => {
-		const embed = getPnlEmbed(trades, '3/23/2026');
+		const { embed } = getPnlEmbed(trades, '3/23/2026');
 		expect(embed.data.color).toBe(0x57F287);
 	});
 
 	it('includes win bar in footer', () => {
-		const embed = getPnlEmbed(trades, '3/23/2026');
+		const { embed } = getPnlEmbed(trades, '3/23/2026');
 		expect(embed.data.footer?.text).toContain('win rate');
 	});
 
 	it('includes date in title with emoji', () => {
-		const embed = getPnlEmbed(trades, '3/23/2026');
+		const { embed } = getPnlEmbed(trades, '3/23/2026');
 		expect(embed.data.title).toContain('📈 SPY 0DTE — 3/23/2026');
 	});
 
 	it('shows flavor text in description', () => {
-		const embed = getPnlEmbed(trades, '3/23/2026');
+		const { embed } = getPnlEmbed(trades, '3/23/2026');
 		expect(embed.data.description).toContain('today');
 	});
 
 	it('includes NET P/L field', () => {
-		const embed = getPnlEmbed(trades, '3/23/2026');
+		const { embed } = getPnlEmbed(trades, '3/23/2026');
 		const pnlField = embed.data.fields?.find(f => f.name === 'NET P/L');
 		expect(pnlField).toBeDefined();
 		// Total: 150 + (-98) = 52
@@ -181,22 +192,22 @@ describe('getPnlEmbed', () => {
 	});
 
 	it('includes RECORD field', () => {
-		const embed = getPnlEmbed(trades, '3/23/2026');
+		const { embed } = getPnlEmbed(trades, '3/23/2026');
 		const recordField = embed.data.fields?.find(f => f.name === 'RECORD');
 		expect(recordField?.value).toContain('1 - 1');
 		expect(recordField?.value).toContain('2 trades');
 	});
 
 	it('includes RISKED field', () => {
-		const embed = getPnlEmbed(trades, '3/23/2026');
+		const { embed } = getPnlEmbed(trades, '3/23/2026');
 		const riskedField = embed.data.fields?.find(f => f.name === 'RISKED');
 		expect(riskedField?.value).toContain('$493');
 	});
 
-	it('includes TRADES field with ansi block', () => {
-		const embed = getPnlEmbed(trades, '3/23/2026');
-		const tradesField = embed.data.fields?.find(f => f.name === 'TRADES');
-		expect(tradesField?.value).toContain('```ansi');
+	it('attaches a trades PNG card', () => {
+		const { embed, files } = getPnlEmbed(trades, '3/23/2026');
+		expect(files.length).toBe(1);
+		expect(embed.data.image?.url).toMatch(/^attachment:\/\/pnl-\d+\.png$/);
 	});
 
 	it('sets red color for negative P/L', () => {
@@ -204,17 +215,195 @@ describe('getPnlEmbed', () => {
 			tradeNum: 1, date: '3/23/2026', day: 'Mon', symbol: 'SPY',
 			type: 'Put', strike: 660, qty: 1, entryTime: '10:00:00',
 			exitTime: '10:30:00', holdTime: 30, entryCost: -200,
-			exitCredit: 50, pnl: -150, pnlPct: -75, isWin: false, groupId: 'G1',
+			exitCredit: 50, pnl: -150, cumulativePnl: -150, pnlPct: -75,
+			isWin: false, groupId: 'G1',
 		}];
-		const embed = getPnlEmbed(lossTrades, '3/23/2026');
+		const { embed } = getPnlEmbed(lossTrades, '3/23/2026');
 		expect(embed.data.color).toBe(0xED4245);
 	});
+});
 
-	it('shows detailed view when requested', () => {
-		const embed = getPnlEmbed(trades, '3/23/2026', true);
-		const tradesField = embed.data.fields?.find(f => f.name === 'TRADES');
-		// Detailed view includes entry → exit prices
-		expect(tradesField?.value).toContain('→');
+// --- Leg helpers ---
+
+function makeTrade(p: Partial<Trade> & { tradeNum: number; entryTime: string; exitTime: string; entryCost: number; exitCredit: number; pnl: number; qty: number }): Trade {
+	return {
+		tradeNum: p.tradeNum,
+		date: p.date ?? '3/23/2026',
+		day: p.day ?? 'Mon',
+		symbol: p.symbol ?? 'SPY',
+		type: p.type ?? 'Call',
+		strike: p.strike ?? 660,
+		qty: p.qty,
+		entryTime: p.entryTime,
+		exitTime: p.exitTime,
+		holdTime: p.holdTime ?? 30,
+		entryCost: p.entryCost,
+		exitCredit: p.exitCredit,
+		pnl: p.pnl,
+		cumulativePnl: p.cumulativePnl ?? p.pnl,
+		pnlPct: p.pnlPct ?? 0,
+		isWin: p.isWin ?? p.pnl > 0,
+		groupId: p.groupId ?? `G${p.tradeNum}`,
+	};
+}
+
+describe('buildLegs', () => {
+	it('single round-trip → one leg with one open + one close', () => {
+		const trades = [makeTrade({
+			tradeNum: 1, entryTime: '10:30:00', exitTime: '10:45:00',
+			entryCost: -300, exitCredit: 450, pnl: 150, qty: 2, groupId: 'G1',
+		})];
+		const { legs, anomalies } = buildLegs(trades);
+		expect(anomalies).toBe(0);
+		expect(legs).toHaveLength(1);
+		expect(legs[0].events).toHaveLength(2);
+		expect(legs[0].events[0].kind).toBe('open');
+		expect(legs[0].events[1].kind).toBe('close');
+		expect(legs[0].pl).toBe(150);
+		expect(legs[0].addsUp + legs[0].addsDown + legs[0].addsFlat).toBe(0);
+		expect(legs[0].totalOpened).toBe(2);
+		expect(legs[0].totalClosed).toBe(2);
+	});
+
+	it('two rows same groupId → scale-out then final close', () => {
+		const trades = [
+			makeTrade({ tradeNum: 1, entryTime: '10:00:00', exitTime: '10:30:00',
+				entryCost: -200, exitCredit: 150, pnl: -50, qty: 2, groupId: 'G1' }),
+			makeTrade({ tradeNum: 2, entryTime: '10:00:00', exitTime: '11:00:00',
+				entryCost: -200, exitCredit: 250, pnl: 50, qty: 2, groupId: 'G1' }),
+		];
+		const { legs } = buildLegs(trades);
+		expect(legs).toHaveLength(1);
+		const closes = legs[0].events.filter(e => e.kind === 'close' || e.kind === 'scale-out');
+		expect(closes).toHaveLength(2);
+		expect(closes[0].kind).toBe('scale-out');
+		expect(closes[1].kind).toBe('close');
+		expect(legs[0].totalOpened).toBe(4);
+		expect(legs[0].totalClosed).toBe(4);
+		expect(legs[0].pl).toBe(0);
+	});
+
+	it('re-entry without flatline → one leg with open + add', () => {
+		const trades = [
+			makeTrade({ tradeNum: 1, entryTime: '10:00:00', exitTime: '10:30:00',
+				entryCost: -200, exitCredit: 0, pnl: 0, qty: 2, groupId: 'G1' }),
+			makeTrade({ tradeNum: 2, entryTime: '10:10:00', exitTime: '10:30:00',
+				entryCost: -500, exitCredit: 0, pnl: 0, qty: 2, groupId: 'G2' }),
+		];
+		// First leg: G1 (qty=2) opens at 10:00, G2 (qty=2) opens at 10:10 as ADD.
+		// Both close at 10:30 (qty=2 each). netQty hits 0 → one leg.
+		const { legs } = buildLegs(trades);
+		expect(legs).toHaveLength(1);
+		const adds = legs[0].events.filter(e => e.kind === 'add');
+		expect(adds).toHaveLength(1);
+		expect(adds[0].direction).toBe('avg-up');
+		expect(legs[0].addsUp).toBe(1);
+	});
+
+	it('flatline then re-entry → two separate legs', () => {
+		const trades = [
+			makeTrade({ tradeNum: 1, entryTime: '10:00:00', exitTime: '10:15:00',
+				entryCost: -100, exitCredit: 150, pnl: 50, qty: 1, groupId: 'G1' }),
+			makeTrade({ tradeNum: 2, entryTime: '11:00:00', exitTime: '11:30:00',
+				entryCost: -100, exitCredit: 50, pnl: -50, qty: 1, groupId: 'G2' }),
+		];
+		const { legs } = buildLegs(trades);
+		expect(legs).toHaveLength(2);
+		expect(legs[0].pl).toBe(50);
+		expect(legs[1].pl).toBe(-50);
+	});
+
+	it('same-price opens within 60s → merged with _fills', () => {
+		const trades = [
+			makeTrade({ tradeNum: 1, entryTime: '10:00:00', exitTime: '10:30:00',
+				entryCost: -100, exitCredit: 0, pnl: 0, qty: 1, groupId: 'G1' }),
+			makeTrade({ tradeNum: 2, entryTime: '10:00:30', exitTime: '10:30:00',
+				entryCost: -100, exitCredit: 0, pnl: 0, qty: 1, groupId: 'G2' }),
+		];
+		// Same per-contract price ($1.00) within 30s → merged into one open event
+		// of qty 2. Then two closes merged too (same time, same price 0).
+		const { legs } = buildLegs(trades);
+		expect(legs).toHaveLength(1);
+		const opens = legs[0].events.filter(e => e.kind === 'open');
+		expect(opens).toHaveLength(1);
+		expect(opens[0].qty).toBe(2);
+		expect(opens[0]._fills).toBe(2);
+		expect(legs[0].addsUp + legs[0].addsDown + legs[0].addsFlat).toBe(0);
+	});
+
+	it('zero-qty rows are counted as anomalies and skipped', () => {
+		const trades = [
+			makeTrade({ tradeNum: 1, entryTime: '10:00:00', exitTime: '10:30:00',
+				entryCost: 0, exitCredit: 0, pnl: 0, qty: 0, groupId: 'G1' }),
+		];
+		const { legs, anomalies } = buildLegs(trades);
+		expect(legs).toHaveLength(0);
+		expect(anomalies).toBe(1);
+	});
+
+	it('computes per-day cumulativePnl as running sum of leg.pl by endDatetime', () => {
+		// CSV's cumulativePnl is all-time; we derive locally so the card shows
+		// per-day running total instead.
+		const trades = [
+			makeTrade({ tradeNum: 1, entryTime: '10:00:00', exitTime: '10:30:00',
+				entryCost: -100, exitCredit: 200, pnl: 100, cumulativePnl: 9999, qty: 1, groupId: 'G1' }),
+			makeTrade({ tradeNum: 2, entryTime: '11:00:00', exitTime: '11:30:00',
+				entryCost: -100, exitCredit: 50, pnl: -50, cumulativePnl: 9999, qty: 1, groupId: 'G2' }),
+		];
+		const { legs } = buildLegs(trades);
+		expect(legs).toHaveLength(2);
+		expect(legs[0].cumulativePnl).toBe(100);
+		expect(legs[1].cumulativePnl).toBe(50);
+	});
+
+	it('sorts legs by startDatetime', () => {
+		const trades = [
+			makeTrade({ tradeNum: 2, entryTime: '11:00:00', exitTime: '11:30:00',
+				entryCost: -100, exitCredit: 200, pnl: 100, qty: 1, groupId: 'G2', strike: 700, type: 'Put' }),
+			makeTrade({ tradeNum: 1, entryTime: '10:00:00', exitTime: '10:30:00',
+				entryCost: -100, exitCredit: 150, pnl: 50, qty: 1, groupId: 'G1' }),
+		];
+		const { legs } = buildLegs(trades);
+		expect(legs[0].startTime).toBe('10:00:00');
+		expect(legs[1].startTime).toBe('11:00:00');
+	});
+});
+
+describe('fmtHold', () => {
+	it('minutes-only under an hour', () => {
+		expect(fmtHold(45)).toBe('45m');
+		expect(fmtHold(0)).toBe('0m');
+	});
+	it('whole hours', () => {
+		expect(fmtHold(60)).toBe('1h');
+		expect(fmtHold(120)).toBe('2h');
+	});
+	it('hours and minutes', () => {
+		expect(fmtHold(62)).toBe('1h 2m');
+		expect(fmtHold(125)).toBe('2h 5m');
+	});
+	it('days and hours', () => {
+		expect(fmtHold(1500)).toBe('1d 1h');
+		expect(fmtHold(24 * 60)).toBe('1d');
+	});
+	it('handles null', () => {
+		expect(fmtHold(null)).toBe('—');
+	});
+});
+
+describe('thetaBand', () => {
+	it('classifies hours into bands', () => {
+		expect(thetaBand(9)).toBe('low');
+		expect(thetaBand(10)).toBe('low');
+		expect(thetaBand(11)).toBe('building');
+		expect(thetaBand(12)).toBe('building');
+		expect(thetaBand(13)).toBe('heavy');
+		expect(thetaBand(14)).toBe('heavy');
+		expect(thetaBand(15)).toBe('extreme');
+		expect(thetaBand(16)).toBe('extreme');
+	});
+	it('returns empty for null', () => {
+		expect(thetaBand(null)).toBe('');
 	});
 });
 

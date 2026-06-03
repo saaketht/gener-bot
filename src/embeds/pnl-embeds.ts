@@ -1,4 +1,5 @@
-import { EmbedBuilder } from 'discord.js';
+import { AttachmentBuilder, EmbedBuilder } from 'discord.js';
+import { renderPnlLegsCard } from './pnl-trades-card';
 
 export interface Trade {
 	tradeNum: number;
@@ -14,6 +15,7 @@ export interface Trade {
 	entryCost: number;
 	exitCredit: number;
 	pnl: number;
+	cumulativePnl: number;
 	pnlPct: number;
 	isWin: boolean;
 	groupId: string;
@@ -40,6 +42,7 @@ export function parseTradesCSV(csv: string): Trade[] {
 			entryCost: parseFloat(cols[19]),
 			exitCredit: parseFloat(cols[21]),
 			pnl: parseFloat(cols[22]),
+			cumulativePnl: parseFloat(cols[23]),
 			pnlPct: parseFloat(cols[24]),
 			isWin: cols[26] === '1',
 			groupId: cols[29],
@@ -84,6 +87,324 @@ export function fmtPct(n: number): string {
 	return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
 }
 
+// --- Leg helpers (ported from rh-trade-exporter calendar.html) ---
+
+export function typeAbbr(type: string): string {
+	return type === 'Call' ? 'C' : type === 'Put' ? 'P' : '?';
+}
+
+// Hold-time formatter — calendar.html:1139-1149.
+export function fmtHold(min: number | null | undefined): string {
+	if (min == null) return '—';
+	if (min < 60) return `${min}m`;
+	if (min < 24 * 60) {
+		const h = Math.floor(min / 60);
+		const m = min % 60;
+		return m ? `${h}h ${m}m` : `${h}h`;
+	}
+	const d = Math.floor(min / (24 * 60));
+	const h = Math.floor((min - d * 24 * 60) / 60);
+	return h ? `${d}d ${h}h` : `${d}d`;
+}
+
+export type ThetaBand = 'low' | 'building' | 'heavy' | 'extreme' | '';
+
+// Theta-pressure band by hour of day (0DTE-specific). calendar.html:908-921.
+export function thetaBand(hour: number | null | undefined): ThetaBand {
+	if (hour == null) return '';
+	if (hour < 11) return 'low';
+	if (hour < 13) return 'building';
+	if (hour < 15) return 'heavy';
+	return 'extreme';
+}
+
+export function thetaBandLabel(hour: number | null | undefined): string {
+	const b = thetaBand(hour);
+	if (b === 'low') return 'low theta';
+	if (b === 'building') return 'theta building';
+	if (b === 'heavy') return 'theta heavy';
+	if (b === 'extreme') return 'theta extreme';
+	return '';
+}
+
+// --- Leg detection ---
+// A "leg" = a continuous holding period for one (strike, type), bounded by going
+// flat. Walks chronological events (one open per group_id + N closes), splits on
+// flatlines. Same-price opens within OPEN_MERGE_SECS are treated as broker-
+// fragmented opening executions (not real adds) and merged into the previous
+// open/add event. Direct port of calendar.html:936-1136.
+
+const OPEN_MERGE_SECS = 60;
+
+export interface LegEvent {
+	kind: 'open' | 'add' | 'scale-out' | 'close';
+	time: string;
+	datetime: string;
+	qty: number;
+	price: number;
+	pl: number;
+	groupId: string;
+	direction?: 'avg-up' | 'avg-down' | 'flat';
+	basisBefore?: number;
+	outcome?: 'profit' | 'loss' | 'flat';
+	_fills?: number;
+}
+
+export interface Leg {
+	strike: number;
+	type: string;
+	startTime: string;
+	endTime: string;
+	startDatetime: string;
+	endDatetime: string;
+	totalOpened: number;
+	totalClosed: number;
+	totalEntryCost: number;
+	totalExitCredit: number;
+	pl: number;
+	addsUp: number;
+	addsDown: number;
+	addsFlat: number;
+	events: LegEvent[];
+	avgEntry: number;
+	avgExit: number;
+	holdMin: number;
+	entryHour: number | null;
+	exitHour: number | null;
+	cumulativePnl: number;
+}
+
+function groupKeyFor(t: Trade): string {
+	return t.groupId || `${t.entryTime}-${t.strike}-${t.type}`;
+}
+
+function contractKeyFor(t: Trade): string {
+	return `${t.strike}-${t.type}`;
+}
+
+// M/D/YYYY → YYYY-MM-DD so datetime strings sort lexicographically.
+function toIsoDate(mdY: string): string {
+	const parts = mdY.split('/');
+	if (parts.length !== 3) return mdY;
+	const [m, d, y] = parts.map(s => s.trim());
+	const yyyy = y.length === 2 ? `20${y}` : y;
+	return `${yyyy}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+}
+
+function padTime(hms: string): string {
+	if (!hms) return '00:00:00';
+	const parts = hms.split(':');
+	while (parts.length < 3) parts.push('00');
+	return parts.map(p => p.padStart(2, '0')).join(':');
+}
+
+function toIsoDatetime(date: string, hms: string): string {
+	return `${toIsoDate(date)}T${padTime(hms)}`;
+}
+
+function hourOf(time: string | null | undefined): number | null {
+	if (!time) return null;
+	const m = String(time).match(/(\d{1,2}):/);
+	return m ? parseInt(m[1]) : null;
+}
+
+export function buildLegs(trades: Trade[]): { legs: Leg[]; anomalies: number } {
+	const result: { legs: Leg[]; anomalies: number } = { legs: [], anomalies: 0 };
+	if (!trades.length) return result;
+
+	// 1. Group rows by groupId.
+	const groups = new Map<string, Trade[]>();
+	for (const t of trades) {
+		const g = groupKeyFor(t);
+		const arr = groups.get(g);
+		if (arr) arr.push(t);
+		else groups.set(g, [t]);
+	}
+
+	// 2. For each (strike, type), build chronological event list.
+	const byContract = new Map<string, LegEvent[]>();
+	groups.forEach(rows => {
+		const first = rows[0];
+		const ck = contractKeyFor(first);
+		const totalQty = rows.reduce((s, r) => s + (r.qty || 0), 0);
+		if (totalQty === 0) {
+			result.anomalies += rows.length;
+			return;
+		}
+		const totalEntryCost = rows.reduce((s, r) => s + Math.abs(r.entryCost || 0), 0);
+		const openPx = totalEntryCost / (totalQty * 100);
+
+		const evs = byContract.get(ck) ?? [];
+		evs.push({
+			kind: 'open',
+			time: first.entryTime,
+			datetime: toIsoDatetime(first.date, first.entryTime),
+			qty: totalQty,
+			price: openPx,
+			pl: 0,
+			groupId: groupKeyFor(first),
+		});
+		for (const r of rows) {
+			if (!(r.qty > 0)) continue;
+			const xPx = (r.exitCredit || 0) / (r.qty * 100);
+			evs.push({
+				kind: 'close',
+				time: r.exitTime,
+				datetime: toIsoDatetime(r.date, r.exitTime),
+				qty: r.qty,
+				price: xPx,
+				pl: r.pnl || 0,
+				groupId: groupKeyFor(r),
+			});
+		}
+		byContract.set(ck, evs);
+	});
+
+	// 3. For each contract: sort events, walk netQty, split at flatlines.
+	//    Merge same-price opens within OPEN_MERGE_SECS into the prior open/add.
+	byContract.forEach((events, ck) => {
+		events.sort((a, b) => a.datetime.localeCompare(b.datetime));
+		const [strikeStr, type] = ck.split('-');
+		const strike = parseFloat(strikeStr);
+		let leg: Leg | null = null;
+		let netQty = 0;
+
+		for (const e of events) {
+			if (!leg) {
+				leg = {
+					strike, type, events: [],
+					startTime: e.time, endTime: e.time,
+					startDatetime: e.datetime, endDatetime: e.datetime,
+					totalOpened: 0, totalClosed: 0,
+					totalEntryCost: 0, totalExitCredit: 0,
+					pl: 0, addsDown: 0, addsUp: 0, addsFlat: 0,
+					avgEntry: 0, avgExit: 0, holdMin: 0,
+					entryHour: null, exitHour: null, cumulativePnl: 0,
+				};
+			}
+			const ev: LegEvent = { ...e };
+
+			if (e.kind === 'open') {
+				if (netQty > 0 && leg.totalOpened > 0) {
+					const basis = leg.totalEntryCost / (leg.totalOpened * 100);
+					const lastOpenLike = [...leg.events].reverse().find(x => x.kind === 'open' || x.kind === 'add');
+					const samePrice = Math.abs(e.price - basis) < 0.005;
+					const dtDelta = lastOpenLike
+						? Math.abs((new Date(e.datetime).getTime() - new Date(lastOpenLike.datetime).getTime()) / 1000)
+						: Infinity;
+					const closeInTime = !!lastOpenLike && dtDelta <= OPEN_MERGE_SECS;
+
+					if (samePrice && closeInTime && lastOpenLike) {
+						// Broker-fragmented open: merge into previous open/add.
+						lastOpenLike.qty += e.qty;
+						lastOpenLike._fills = (lastOpenLike._fills || 1) + 1;
+						lastOpenLike.time = e.time;
+						lastOpenLike.datetime = e.datetime;
+						leg.totalOpened += e.qty;
+						leg.totalEntryCost += e.price * e.qty * 100;
+						netQty += e.qty;
+						leg.endTime = e.time;
+						leg.endDatetime = e.datetime;
+						continue;
+					}
+
+					ev.kind = 'add';
+					ev.basisBefore = basis;
+					if (e.price < basis - 0.005) {
+						ev.direction = 'avg-down';
+						leg.addsDown++;
+					}
+					else if (e.price > basis + 0.005) {
+						ev.direction = 'avg-up';
+						leg.addsUp++;
+					}
+					else {
+						ev.direction = 'flat';
+						leg.addsFlat++;
+					}
+				}
+				leg.totalOpened += e.qty;
+				leg.totalEntryCost += e.price * e.qty * 100;
+				netQty += e.qty;
+			}
+			else {
+				leg.totalClosed += e.qty;
+				leg.totalExitCredit += e.price * e.qty * 100;
+				leg.pl += e.pl;
+				netQty -= e.qty;
+			}
+			leg.events.push(ev);
+			leg.endTime = e.time;
+			leg.endDatetime = e.datetime;
+
+			if (netQty <= 0) {
+				result.legs.push(leg);
+				leg = null;
+				netQty = 0;
+			}
+		}
+		if (leg) result.legs.push(leg);
+	});
+
+	// 4. Per-leg post-pass: merge same-price consecutive closes, annotate
+	//    scale-out vs final close + outcome, compute averages and hours.
+	for (const l of result.legs) {
+		const merged: LegEvent[] = [];
+		for (const e of l.events) {
+			const last = merged[merged.length - 1];
+			const dtDelta = last
+				? Math.abs((new Date(e.datetime).getTime() - new Date(last.datetime).getTime()) / 1000)
+				: Infinity;
+			if (last && e.kind === 'close' && last.kind === 'close'
+				&& Math.abs(e.price - last.price) < 0.005
+				&& dtDelta <= OPEN_MERGE_SECS) {
+				last.qty += e.qty;
+				last.pl += e.pl;
+				last._fills = (last._fills || 1) + 1;
+				last.time = e.time;
+				last.datetime = e.datetime;
+			}
+			else {
+				merged.push({ ...e });
+			}
+		}
+		l.events = merged;
+
+		let n = 0;
+		for (const e of l.events) {
+			if (e.kind === 'open' || e.kind === 'add') {
+				n += e.qty;
+			}
+			else {
+				n -= e.qty;
+				e.kind = n > 0 ? 'scale-out' : 'close';
+				e.outcome = e.pl > 0 ? 'profit' : e.pl < 0 ? 'loss' : 'flat';
+			}
+		}
+		l.avgEntry = l.totalOpened ? l.totalEntryCost / (l.totalOpened * 100) : 0;
+		l.avgExit = l.totalClosed ? l.totalExitCredit / (l.totalClosed * 100) : 0;
+		l.holdMin = (l.startDatetime && l.endDatetime)
+			? Math.round((new Date(l.endDatetime).getTime() - new Date(l.startDatetime).getTime()) / 60000)
+			: 0;
+		l.entryHour = hourOf(l.startTime);
+		l.exitHour = hourOf(l.endTime);
+	}
+
+	// 5. Per-day running cumulative P/L through each leg, anchored at the close
+	//    time (when the leg's P/L is realized). The CSV's Cumulative P/L column
+	//    is all-time/cross-day, which isn't what we want for a per-day card —
+	//    derive it locally from leg.pl ordered by endDatetime.
+	const byEnd = [...result.legs].sort((a, b) => a.endDatetime.localeCompare(b.endDatetime));
+	let running = 0;
+	for (const l of byEnd) {
+		running += l.pl;
+		l.cumulativePnl = running;
+	}
+
+	result.legs.sort((a, b) => a.startDatetime.localeCompare(b.startDatetime));
+	return result;
+}
+
 function getFlavorText(totalPnl: number, totalPnlPct: number): string {
 	if (totalPnl > 500) return `dude fr made +${fmtDollars(totalPnl)} (${fmtPct(totalPnlPct)}) today 🔥`;
 	if (totalPnl > 200) return `bro made +${fmtDollars(totalPnl)} (${fmtPct(totalPnlPct)}) today 🤯`;
@@ -94,7 +415,10 @@ function getFlavorText(totalPnl: number, totalPnlPct: number): string {
 	return `absolute disaster — ${fmtDollars(totalPnl)} (${fmtPct(totalPnlPct)}) today 🪦`;
 }
 
-// --- Grouping ---
+// --- Recap-only path ---
+// groupTrades / sortTrades / buildTradeBlock are retained for recap-embeds.ts
+// (multi-day text recap). The single-day pnl card uses buildLegs (above) + the
+// PNG renderer instead. Delete this block once recap is migrated.
 
 interface GroupedTrade {
 	type: string;
@@ -206,7 +530,14 @@ export function buildWinBar(wins: number, losses: number): string {
 
 // --- Embeds ---
 
-export function getPnlEmbed(trades: Trade[], dateStr: string, detailed = false): EmbedBuilder {
+export interface PnlEmbedResult {
+	embed: EmbedBuilder;
+	files: AttachmentBuilder[];
+}
+
+let pnlCardCounter = 0;
+
+export function getPnlEmbed(trades: Trade[], dateStr: string): PnlEmbedResult {
 	const totalPnl = trades.reduce((sum, t) => sum + t.pnl, 0);
 	const totalRisk = trades.reduce((sum, t) => sum + Math.abs(t.entryCost), 0);
 	const totalPnlPct = totalRisk > 0 ? (totalPnl / totalRisk) * 100 : 0;
@@ -214,12 +545,10 @@ export function getPnlEmbed(trades: Trade[], dateStr: string, detailed = false):
 	const losses = trades.length - wins;
 	const isUp = totalPnl >= 0;
 
-	const grouped = groupTrades(trades);
-	const sorted = sortTrades(grouped);
-	const tradeBlock = buildTradeBlock(sorted, detailed);
+	const { legs } = buildLegs(trades);
 	const winBar = buildWinBar(wins, losses);
 
-	return new EmbedBuilder()
+	const embed = new EmbedBuilder()
 		.setColor(isUp ? 0x57F287 : 0xED4245)
 		.setTitle(`${isUp ? '📈' : '📉'} SPY 0DTE — ${dateStr}`)
 		.setDescription(getFlavorText(totalPnl, totalPnlPct))
@@ -239,14 +568,21 @@ export function getPnlEmbed(trades: Trade[], dateStr: string, detailed = false):
 				value: `**${fmtDollars(totalRisk)}**\n${fmtPct(totalPnlPct)} return`,
 				inline: true,
 			},
-			{
-				name: 'TRADES',
-				value: tradeBlock,
-				inline: false,
-			},
 		)
 		.setFooter({ text: winBar })
 		.setTimestamp();
+
+	// Render legs as a PNG attachment — Discord embed code blocks have an
+	// unfixable wrap problem (discord.js#3030), pixel-rendered tables don't.
+	const files: AttachmentBuilder[] = [];
+	const card = renderPnlLegsCard(legs);
+	if (card) {
+		const filename = `pnl-${++pnlCardCounter}.png`;
+		files.push(new AttachmentBuilder(card, { name: filename }));
+		embed.setImage(`attachment://${filename}`);
+	}
+
+	return { embed, files };
 }
 
 export function getNoTradesEmbed(dateStr: string, recapBlock?: string): EmbedBuilder {

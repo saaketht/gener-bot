@@ -1,4 +1,3 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { MessageEvent } from '../../types';
 import logger from '../../utils/logger';
 import {
@@ -10,15 +9,6 @@ import {
 } from '../../embeds/pnl-embeds';
 import { getUniqueTradingDays, getDaySummary, buildRecapBlock } from '../../embeds/recap-embeds';
 import { readTradesCSV } from '../../utils/tradeData';
-
-function detailButton(dateStr: string): ActionRowBuilder<ButtonBuilder> {
-	return new ActionRowBuilder<ButtonBuilder>().addComponents(
-		new ButtonBuilder()
-			.setCustomId(`pnl_details_${dateStr}`)
-			.setLabel('Show details')
-			.setStyle(ButtonStyle.Secondary),
-	);
-}
 
 const messageEvent: MessageEvent = {
 	name: 'pnl',
@@ -56,10 +46,8 @@ const messageEvent: MessageEvent = {
 			}
 
 			logger.info(`pnl: ${message.author.username} → ${requestedDate} (${dayTrades.length} trades)`);
-			await message.reply({
-				embeds: [getPnlEmbed(dayTrades, requestedDate)],
-				components: [detailButton(requestedDate)],
-			});
+			const { embed, files } = getPnlEmbed(dayTrades, requestedDate);
+			await message.reply({ embeds: [embed], files });
 		}
 		catch (error) {
 			logger.error('pnl error:', error);

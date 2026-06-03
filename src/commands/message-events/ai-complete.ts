@@ -356,8 +356,8 @@ const toolHandlers: Record<string, ToolHandler> = {
 			}
 
 			if (showEmbed && ctx.message.channel.isSendable()) {
-				const embed = getPnlEmbed(dayTrades, dateStr);
-				const sent = await ctx.message.channel.send({ embeds: [embed] });
+				const { embed, files } = getPnlEmbed(dayTrades, dateStr);
+				const sent = await ctx.message.channel.send({ embeds: [embed], files });
 				ctx.sentEmbedIds.push(sent.id);
 			}
 
