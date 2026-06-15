@@ -50,16 +50,18 @@ function findTicker(query: string, tickers: TickerRow[]): TickerRow | null {
 	const threshold = q.length <= 5 ? 1 : 2;
 	let best: { row: TickerRow; dist: number } | null = null;
 	for (const t of tickers) {
-		const candidates = [t.symbol.toUpperCase()];
+		const symbol = t.symbol.toUpperCase();
+		// Symbol fuzzy-match requires equal length: length-changing edits
+		// (QQQM↔QQQ, GOOGL↔GOOG) are almost always distinct tickers, not typos.
+		if (symbol.length === q.length) {
+			const d = levenshtein(q, symbol);
+			if (d <= threshold && (!best || d < best.dist)) best = { row: t, dist: d };
+		}
 		if (t.name) {
 			for (const word of t.name.toUpperCase().split(/\s+/)) {
-				if (word) candidates.push(word);
-			}
-		}
-		for (const c of candidates) {
-			const d = levenshtein(q, c);
-			if (d <= threshold && (!best || d < best.dist)) {
-				best = { row: t, dist: d };
+				if (!word) continue;
+				const d = levenshtein(q, word);
+				if (d <= threshold && (!best || d < best.dist)) best = { row: t, dist: d };
 			}
 		}
 	}
