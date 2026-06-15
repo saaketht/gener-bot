@@ -32,6 +32,20 @@ export interface PriceData {
 	source: string;
 }
 
+export interface HistoryPoint {
+	t: number;
+	price: number;
+}
+
+export interface HistoryData {
+	symbol: string;
+	query_symbol?: string;
+	name?: string;
+	range: string;
+	points: HistoryPoint[];
+	source: string;
+}
+
 async function fetchFinnhub(symbol: string): Promise<PriceData | null> {
 	const key = process.env.FINNHUB_API_KEY;
 	if (!key) return null;
@@ -278,4 +292,99 @@ export async function getAssetPrice(symbol: string, type: AssetType): Promise<Pr
 	const data = await getPrice(normalized);
 	if (!data) return null;
 	return { ...data, symbol: symbol.toUpperCase(), query_symbol: normalized };
+}
+
+// Yahoo range/interval pairs for the historical timeframe buttons. '1d' is
+// intentionally absent — the live intraday path (getAssetPrice → renderAssetChart)
+// handles it with full session/extended-hours detail.
+const RANGE_INTERVAL: Record<string, { range: string; interval: string }> = {
+	'1w': { range: '5d', interval: '30m' },
+	'1m': { range: '1mo', interval: '1d' },
+	'3m': { range: '3mo', interval: '1d' },
+	'ytd': { range: 'ytd', interval: '1d' },
+	'1y': { range: '1y', interval: '1d' },
+	'5y': { range: '5y', interval: '1wk' },
+	'all': { range: 'max', interval: '1mo' },
+};
+
+// Display labels for every timeframe (includes '1d' for the button/footer UI).
+export const RANGE_LABELS: Record<string, string> = {
+	'1d': '1D',
+	'1w': '1W',
+	'1m': '1M',
+	'3m': '3M',
+	'ytd': 'YTD',
+	'1y': '1Y',
+	'5y': '5Y',
+	'all': 'ALL',
+};
+
+async function fetchYahooHistory(symbol: string, yRange: string, interval: string): Promise<HistoryData | null> {
+	try {
+		const res = await fetch(
+			`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol.toUpperCase())}?interval=${interval}&range=${yRange}`,
+			{ headers: { 'User-Agent': 'Mozilla/5.0' } },
+		);
+		if (!res.ok) {
+			logger.warn(`Yahoo history ${symbol} (${yRange}) returned ${res.status}`);
+			return null;
+		}
+		const data = await res.json();
+		const result = data?.chart?.result?.[0];
+		const meta = result?.meta;
+		const timestamps: number[] | undefined = result?.timestamp;
+		const closes: (number | null)[] | undefined = result?.indicators?.quote?.[0]?.close;
+		if (!timestamps || !closes || timestamps.length !== closes.length) {
+			logger.warn(`Yahoo history ${symbol} (${yRange}) missing series`);
+			return null;
+		}
+
+		const points: HistoryPoint[] = [];
+		for (let i = 0; i < timestamps.length; i++) {
+			const c = closes[i];
+			if (c == null) continue;
+			points.push({ t: timestamps[i], price: c });
+		}
+		if (points.length < 2) return null;
+
+		const out: HistoryData = {
+			symbol: symbol.toUpperCase(),
+			range: yRange,
+			points,
+			source: 'yahoo',
+		};
+		const name = meta?.longName ?? meta?.shortName;
+		if (name) out.name = name;
+		return out;
+	}
+	catch (e) {
+		logger.warn(`Yahoo history fetch failed for ${symbol} (${yRange}):`, e);
+		return null;
+	}
+}
+
+interface HistoryCacheEntry { data: HistoryData; ts: number }
+const historyCache = new Map<string, HistoryCacheEntry>();
+const HISTORY_TTL_MS = 5 * 60_000;
+const HISTORY_MAX = 200;
+
+export async function getHistory(symbol: string, range: string, type: AssetType): Promise<HistoryData | null> {
+	const conf = RANGE_INTERVAL[range];
+	if (!conf) return null;
+	const normalized = normalizeSymbol(symbol, type);
+	const cacheKey = `${normalized}:${range}`;
+
+	const hit = historyCache.get(cacheKey);
+	if (hit && Date.now() - hit.ts < HISTORY_TTL_MS) return hit.data;
+
+	const fetched = await fetchYahooHistory(normalized, conf.range, conf.interval);
+	if (!fetched) return null;
+	const out: HistoryData = { ...fetched, symbol: symbol.toUpperCase(), query_symbol: normalized, range };
+
+	if (historyCache.size >= HISTORY_MAX) {
+		const oldest = historyCache.keys().next().value;
+		if (oldest) historyCache.delete(oldest);
+	}
+	historyCache.set(cacheKey, { data: out, ts: Date.now() });
+	return out;
 }

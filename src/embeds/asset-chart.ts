@@ -1,6 +1,6 @@
 import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
 import * as path from 'path';
-import { PriceData, AssetType, IntradaySeries, Session } from '../utils/priceApi';
+import { PriceData, AssetType, IntradaySeries, Session, HistoryData, RANGE_LABELS } from '../utils/priceApi';
 
 // Register Inter so rendering is consistent across hosts. Without this canvas
 // falls back to whatever sans-serif the OS happens to have (DejaVu on Debian)
@@ -335,4 +335,183 @@ function sessionTag(session: Session | undefined): string | null {
 	if (session === 'pre') return 'PRE';
 	if (session === 'post') return 'AH';
 	return null;
+}
+
+function formatAxisDate(tSec: number, spanDays: number): string {
+	const d = new Date(tSec * 1000);
+	if (spanDays <= 7) return d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
+	if (spanDays <= 370) return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+	return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+}
+
+// Multi-day timeframe chart. Deliberately simpler than the intraday renderer:
+// no session bands or extended-hours styling (irrelevant beyond 1d). Change and
+// the dashed baseline are measured from the first point of the window, so the
+// percent reflects the selected timeframe rather than yesterday's close.
+export function renderHistoryChart(data: HistoryData, type: AssetType, displayName?: string): Buffer | null {
+	const pts = data.points;
+	if (pts.length < 2) return null;
+
+	const first = pts[0].price;
+	const last = pts[pts.length - 1].price;
+	const change = last - first;
+	const pct = first !== 0 ? (change / first) * 100 : 0;
+	const isUp = change >= 0;
+	const palette = TYPE_PALETTE[type][isUp ? 'up' : 'down'];
+	const downColor = TYPE_PALETTE[type].down.line;
+
+	const canvas = createCanvas(W, H);
+	const ctx = canvas.getContext('2d');
+	ctx.fillStyle = COLORS.bg;
+	ctx.fillRect(0, 0, W, H);
+
+	const company = displayName ?? data.name;
+	if (company) {
+		ctx.fillStyle = COLORS.dim;
+		ctx.font = '13px Inter';
+		ctx.fillText(company.toUpperCase(), 28, 30);
+	}
+
+	ctx.fillStyle = COLORS.text;
+	ctx.font = 'bold 34px Inter';
+	ctx.fillText(data.symbol, 28, 64);
+	const tickerW = ctx.measureText(data.symbol).width;
+
+	ctx.fillStyle = palette.line;
+	const priceStr = `$${fmtPrice(last)}`;
+	ctx.fillText(priceStr, 28 + tickerW + 16, 64);
+	const priceW = ctx.measureText(priceStr).width;
+
+	const rangeLabel = RANGE_LABELS[data.range] ?? data.range.toUpperCase();
+	const badgeX = 28 + tickerW + 16 + priceW + 12;
+	ctx.font = 'bold 12px Inter';
+	const badgeW = ctx.measureText(rangeLabel).width + 14;
+	ctx.fillStyle = 'rgba(155,161,168,0.22)';
+	ctx.fillRect(badgeX, 42, badgeW, 22);
+	ctx.fillStyle = COLORS.dim;
+	ctx.fillText(rangeLabel, badgeX + 7, 57);
+
+	const arrow = isUp ? '▲' : '▼';
+	const sign = isUp ? '+' : '-';
+	ctx.fillStyle = isUp ? palette.line : downColor;
+	ctx.font = '18px Inter';
+	ctx.fillText(`${arrow} ${sign}$${fmt(Math.abs(change))}  (${sign}${Math.abs(pct).toFixed(2)}%)`, 28, 92);
+	ctx.fillStyle = COLORS.dim;
+	ctx.font = '13px Inter';
+	ctx.fillText(`over ${rangeLabel}`, 28, 112);
+
+	const prices = pts.map(p => p.price);
+	const hi = Math.max(...prices);
+	const lo = Math.min(...prices);
+	const stats: Array<{ label: string; value: string }> = [
+		{ label: 'HIGH', value: `$${fmtPrice(hi)}` },
+		{ label: 'LOW', value: `$${fmtPrice(lo)}` },
+		{ label: 'START', value: `$${fmtPrice(first)}` },
+	];
+	const statsRight = W - 28;
+	const statsLeft = statsRight - 150;
+	const statRowH = 20;
+	const statsTop = 38;
+	ctx.font = '13px Inter';
+	for (let i = 0; i < stats.length; i++) {
+		const y = statsTop + i * statRowH;
+		ctx.textAlign = 'left';
+		ctx.fillStyle = COLORS.dim;
+		ctx.fillText(stats[i].label, statsLeft, y);
+		ctx.textAlign = 'right';
+		ctx.fillStyle = COLORS.text;
+		ctx.fillText(stats[i].value, statsRight, y);
+	}
+	ctx.textAlign = 'left';
+
+	const chartX = 28, chartY = 130, chartW = W - 56, chartH = 210;
+	ctx.fillStyle = COLORS.panel;
+	ctx.fillRect(chartX, chartY, chartW, chartH);
+
+	const tMin = pts[0].t;
+	const tMax = pts[pts.length - 1].t;
+	const span = Math.max(1, tMax - tMin);
+	const xScale = (t: number) => chartX + ((t - tMin) / span) * chartW;
+	const pad = (hi - lo) * 0.08 || hi * 0.02 || 1;
+	const yMin = Math.min(lo, first) - pad;
+	const yMax = Math.max(hi, first) + pad;
+	const ySpan = Math.max(0.0001, yMax - yMin);
+	const yScale = (v: number) => chartY + chartH - ((v - yMin) / ySpan) * chartH;
+
+	// Gridlines (labels drawn later, on top of the price line)
+	ctx.lineWidth = 1;
+	ctx.strokeStyle = COLORS.grid;
+	for (let g = 0; g <= 4; g++) {
+		const y = chartY + (chartH / 4) * g;
+		ctx.beginPath();
+		ctx.moveTo(chartX, y);
+		ctx.lineTo(chartX + chartW, y);
+		ctx.stroke();
+	}
+
+	// Window-start baseline
+	ctx.strokeStyle = COLORS.prevLine;
+	ctx.setLineDash([4, 4]);
+	const by = yScale(first);
+	ctx.beginPath();
+	ctx.moveTo(chartX, by);
+	ctx.lineTo(chartX + chartW, by);
+	ctx.stroke();
+	ctx.setLineDash([]);
+
+	// Fill + line
+	ctx.beginPath();
+	ctx.moveTo(xScale(pts[0].t), chartY + chartH);
+	for (const p of pts) ctx.lineTo(xScale(p.t), yScale(p.price));
+	ctx.lineTo(xScale(pts[pts.length - 1].t), chartY + chartH);
+	ctx.closePath();
+	ctx.fillStyle = palette.fill;
+	ctx.fill();
+
+	ctx.strokeStyle = palette.line;
+	ctx.lineWidth = 2;
+	ctx.beginPath();
+	pts.forEach((p, i) => {
+		const x = xScale(p.t);
+		const y = yScale(p.price);
+		if (i === 0) ctx.moveTo(x, y);
+		else ctx.lineTo(x, y);
+	});
+	ctx.stroke();
+
+	// End dot
+	ctx.fillStyle = palette.line;
+	ctx.beginPath();
+	ctx.arc(xScale(pts[pts.length - 1].t), yScale(last), 4, 0, Math.PI * 2);
+	ctx.fill();
+
+	// Y-axis price labels — drawn last with a backing so they stay legible where
+	// the price line crosses them.
+	ctx.font = '11px Inter';
+	ctx.textAlign = 'right';
+	for (let g = 0; g <= 4; g++) {
+		const y = chartY + (chartH / 4) * g;
+		const yLabel = `$${fmtPrice(yMax - (ySpan / 4) * g)}`;
+		const lw = ctx.measureText(yLabel).width;
+		ctx.fillStyle = COLORS.panel;
+		ctx.fillRect(chartX + chartW - lw - 8, y - 13, lw + 8, 14);
+		ctx.fillStyle = COLORS.dim;
+		ctx.fillText(yLabel, chartX + chartW - 4, y - 3);
+	}
+	ctx.textAlign = 'left';
+
+	// X-axis date labels
+	const labelCount = 5;
+	const spanDays = span / 86400;
+	ctx.fillStyle = COLORS.dim;
+	ctx.font = '11px Inter';
+	for (let i = 0; i <= labelCount; i++) {
+		const t = tMin + (span / labelCount) * i;
+		const label = formatAxisDate(t, spanDays);
+		const w = ctx.measureText(label).width;
+		const lx = Math.max(chartX, Math.min(chartX + chartW - w, xScale(t) - w / 2));
+		ctx.fillText(label, lx, chartY + chartH + 18);
+	}
+
+	return canvas.toBuffer('image/png');
 }

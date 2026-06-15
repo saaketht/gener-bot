@@ -1,7 +1,7 @@
 import { EmbedBuilder, AttachmentBuilder } from 'discord.js';
 import { MessageEvent } from '../../types';
 import logger from '../../utils/logger';
-import { getAssetEmbed } from '../../embeds/asset-embeds';
+import { getAssetEmbed, buildTimeframeRows } from '../../embeds/asset-embeds';
 import { renderWatchlistCard } from '../../embeds/asset-watchlist';
 import { getAssetPrice, getPrice, toAssetType, PriceData, AssetType } from '../../utils/priceApi';
 import { WatchedTickers } from '../../models/dbObjects';
@@ -159,9 +159,15 @@ const messageEvent: MessageEvent = {
 			}
 
 			const built = successful.map(r => getAssetEmbed(r.price, r.resolved.type, r.resolved.name));
+			// Single-ticker replies get timeframe buttons; multi-ticker collapses to a
+			// watchlist card above, where per-ticker timeframes would be ambiguous.
+			const components = successful.length === 1
+				? buildTimeframeRows(successful[0].price.symbol, successful[0].resolved.type, '1d')
+				: [];
 			await message.reply({
 				embeds: built.map(b => b.embed),
 				files: built.flatMap(b => b.files),
+				components,
 			});
 		}
 		catch (error) {
