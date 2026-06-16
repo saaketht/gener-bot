@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { normalizeSymbol, toAssetType, getPrice, getAssetPrice, clearPriceCache } from './priceApi';
+import { normalizeSymbol, toAssetType, getPrice, getAssetPrice, getHistory, clearPriceCache, clearHistoryCache } from './priceApi';
 
 // --- normalizeSymbol ---
 
@@ -201,6 +201,15 @@ describe('getPrice', () => {
 		expect(fetchMock.mock.calls.length).toBe(firstCallCount);
 	});
 
+	it('force=true bypasses the price cache', async () => {
+		const fetchMock = makeFetch(null, yahooResponse);
+		vi.stubGlobal('fetch', fetchMock);
+		await getPrice('SPY');
+		const firstCallCount = fetchMock.mock.calls.length;
+		await getPrice('SPY', true);
+		expect(fetchMock.mock.calls.length).toBeGreaterThan(firstCallCount);
+	});
+
 	it('refetches after TTL expires', async () => {
 		const fetchMock = makeFetch(null, yahooResponse);
 		vi.stubGlobal('fetch', fetchMock);
@@ -298,5 +307,115 @@ describe('getAssetPrice', () => {
 		vi.stubGlobal('fetch', makeFetch(null, null));
 		const result = await getAssetPrice('INVALID', 'stock');
 		expect(result).toBeNull();
+	});
+});
+
+// --- getHistory (mocked fetch) ---
+
+function historyResponse(opts: {
+	timestamps: number[];
+	closes: (number | null)[];
+	regularMarketPrice?: number;
+	regularMarketTime?: number;
+	name?: string;
+}) {
+	return {
+		ok: true,
+		json: () => Promise.resolve({
+			chart: { result: [{
+				meta: {
+					longName: opts.name,
+					regularMarketPrice: opts.regularMarketPrice,
+					regularMarketTime: opts.regularMarketTime,
+				},
+				timestamp: opts.timestamps,
+				indicators: { quote: [{ close: opts.closes }] },
+			}] },
+		}),
+	};
+}
+
+describe('getHistory', () => {
+	beforeEach(() => clearHistoryCache());
+
+	it('returns null for an intraday-only / unknown range without fetching', async () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal('fetch', fetchMock);
+		expect(await getHistory('AAPL', '1d', 'stock')).toBeNull();
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('builds points, drops nulls, keeps the friendly symbol and range', async () => {
+		vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(historyResponse({
+			timestamps: [100, 200, 300],
+			closes: [10, null, 12],
+			name: 'Apple Inc.',
+		}))));
+		const h = await getHistory('AAPL', '1y', 'stock');
+		expect(h!.symbol).toBe('AAPL');
+		expect(h!.range).toBe('1y');
+		expect(h!.name).toBe('Apple Inc.');
+		expect(h!.points).toEqual([{ t: 100, price: 10 }, { t: 300, price: 12 }]);
+	});
+
+	it('normalizes crypto and commodity symbols into the Yahoo query form', async () => {
+		const fetchMock = vi.fn(() => Promise.resolve(historyResponse({ timestamps: [1, 2], closes: [1, 2] })));
+		vi.stubGlobal('fetch', fetchMock);
+
+		const btc = await getHistory('btc', '1y', 'crypto');
+		expect(btc!.query_symbol).toBe('BTC-USD');
+		expect(fetchMock.mock.calls[0][0]).toContain('BTC-USD');
+
+		const wti = await getHistory('WTI', '5y', 'commodity');
+		expect(wti!.query_symbol).toBe('CL=F');
+		expect(fetchMock.mock.calls[1][0]).toContain(encodeURIComponent('CL=F'));
+	});
+
+	it('appends the live tick when it is newer than the last candle', async () => {
+		vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(historyResponse({
+			timestamps: [100, 200],
+			closes: [10, 11],
+			regularMarketPrice: 12.5,
+			regularMarketTime: 300,
+		}))));
+		const h = await getHistory('SPY', '5y', 'stock');
+		expect(h!.points[h!.points.length - 1]).toEqual({ t: 300, price: 12.5 });
+	});
+
+	it('does not append a stale live tick at or before the last candle', async () => {
+		vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(historyResponse({
+			timestamps: [100, 200],
+			closes: [10, 11],
+			regularMarketPrice: 99,
+			regularMarketTime: 200,
+		}))));
+		const h = await getHistory('QQQ', '5y', 'stock');
+		expect(h!.points).toEqual([{ t: 100, price: 10 }, { t: 200, price: 11 }]);
+	});
+
+	it('returns null when fewer than 2 points survive', async () => {
+		vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(historyResponse({ timestamps: [1], closes: [10] }))));
+		expect(await getHistory('TSLA', '1y', 'stock')).toBeNull();
+	});
+
+	it('returns null on a non-ok response', async () => {
+		vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: false, status: 404 })));
+		expect(await getHistory('NOPE', '1y', 'stock')).toBeNull();
+	});
+
+	it('serves a second call within TTL from cache', async () => {
+		const fetchMock = vi.fn(() => Promise.resolve(historyResponse({ timestamps: [1, 2], closes: [1, 2] })));
+		vi.stubGlobal('fetch', fetchMock);
+		await getHistory('NVDA', '1y', 'stock');
+		await getHistory('NVDA', '1y', 'stock');
+		expect(fetchMock.mock.calls.length).toBe(1);
+	});
+
+	it('force=true bypasses the history cache', async () => {
+		const fetchMock = vi.fn(() => Promise.resolve(historyResponse({ timestamps: [1, 2], closes: [1, 2] })));
+		vi.stubGlobal('fetch', fetchMock);
+		await getHistory('AMD', '1y', 'stock');
+		await getHistory('AMD', '1y', 'stock', true);
+		expect(fetchMock.mock.calls.length).toBe(2);
 	});
 });

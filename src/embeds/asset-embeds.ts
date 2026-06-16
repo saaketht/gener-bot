@@ -1,5 +1,5 @@
 import { EmbedBuilder, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
-import { PriceData, AssetType, HistoryData, RANGE_LABELS } from '../utils/priceApi';
+import { PriceData, AssetType, HistoryData, RANGE_LABELS, toAssetType, getAssetPrice, getHistory } from '../utils/priceApi';
 import { renderAssetChart, renderHistoryChart } from './asset-chart';
 
 function fmt(val: number, decimals = 2): string {
@@ -127,6 +127,44 @@ export function getHistoryEmbed(data: HistoryData, type: AssetType, displayName?
 // handler can re-normalize per type and keep the displayed ticker stable.
 const TIMEFRAME_ORDER = ['1d', '1w', '1m', '3m', 'ytd', '1y', '5y', 'all'];
 
+// Fetch + build the embed for a timeframe view. 1d uses the live intraday quote;
+// other ranges use historical candles. force bypasses caches (the refresh button).
+// Returns null when the fetch yields nothing, leaving the Discord-facing handler
+// to decide how to surface that. Kept free of interaction objects so it's testable.
+export async function resolveAssetView(
+	symbol: string,
+	type: AssetType,
+	range: string,
+	force = false,
+): Promise<AssetEmbedResult | null> {
+	if (range === '1d') {
+		const price = await getAssetPrice(symbol, type, force);
+		return price ? getAssetEmbed(price, type) : null;
+	}
+	const hist = await getHistory(symbol, range, type, force);
+	return hist ? getHistoryEmbed(hist, type) : null;
+}
+
+// Decode a timeframe / refresh button customId back into its parts. range and
+// type never contain underscores, so two leading splits isolate the symbol
+// intact even if the symbol itself does (e.g. NATURAL_GAS).
+export function parseTimeframeCustomId(customId: string): { range: string; type: AssetType; symbol: string } | null {
+	const prefix = customId.startsWith('asset_tf_') ? 'asset_tf_'
+		: customId.startsWith('asset_refresh_') ? 'asset_refresh_'
+			: null;
+	if (!prefix) return null;
+	const rest = customId.slice(prefix.length);
+	const i1 = rest.indexOf('_');
+	if (i1 < 0) return null;
+	const range = rest.slice(0, i1);
+	const rest2 = rest.slice(i1 + 1);
+	const i2 = rest2.indexOf('_');
+	if (i2 < 0) return null;
+	const symbol = rest2.slice(i2 + 1);
+	if (!range || !symbol) return null;
+	return { range, type: toAssetType(rest2.slice(0, i2)), symbol };
+}
+
 export function buildTimeframeRows(displaySymbol: string, type: AssetType, active: string): ActionRowBuilder<ButtonBuilder>[] {
 	const rows: ActionRowBuilder<ButtonBuilder>[] = [];
 	for (let i = 0; i < TIMEFRAME_ORDER.length; i += 4) {
@@ -143,6 +181,15 @@ export function buildTimeframeRows(displaySymbol: string, type: AssetType, activ
 		}
 		rows.push(row);
 	}
+	// Refresh re-fetches the active timeframe with fresh data (cache bypassed).
+	// Encodes the active range so the handler knows what to re-pull. Rides on the
+	// last row's spare slot (4 timeframes + refresh = 5, Discord's row max).
+	rows[rows.length - 1].addComponents(
+		new ButtonBuilder()
+			.setCustomId(`asset_refresh_${active}_${type}_${displaySymbol}`)
+			.setEmoji('🔄')
+			.setStyle(ButtonStyle.Secondary),
+	);
 	return rows;
 }
 

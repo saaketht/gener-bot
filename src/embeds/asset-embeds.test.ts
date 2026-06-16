@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { getAssetEmbed } from './asset-embeds';
-import { PriceData } from '../utils/priceApi';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { getAssetEmbed, getHistoryEmbed, buildTimeframeRows, parseTimeframeCustomId, resolveAssetView } from './asset-embeds';
+import { PriceData, HistoryData, clearPriceCache, clearHistoryCache } from '../utils/priceApi';
 
 const stockUp: PriceData = {
 	symbol: 'SPY',
@@ -184,5 +184,187 @@ describe('getAssetEmbed — 52-week data (text fallback)', () => {
 		const high = fields.find(f => f.name === '52wk High');
 		expect(low?.value).toContain('490.68');
 		expect(high?.value).toContain('613.23');
+	});
+});
+
+const historyUp: HistoryData = {
+	symbol: 'QQQM',
+	query_symbol: 'QQQM',
+	name: 'Invesco NASDAQ 100 ETF',
+	range: '1y',
+	source: 'yahoo',
+	points: [
+		{ t: 100, price: 220 },
+		{ t: 200, price: 250 },
+		{ t: 300, price: 305 },
+	],
+};
+
+describe('getHistoryEmbed', () => {
+	it('measures change from the first point of the window, not prev close', () => {
+		const json = getHistoryEmbed(historyUp, 'stock').embed.toJSON();
+		// (305 - 220) / 220 = 38.64%
+		expect(json.description).toContain('38.64%');
+		expect(json.description).toContain('over 1Y');
+		expect(json.title).toContain('🟢');
+		expect(json.title).toContain('305');
+	});
+
+	it('renders red and negative for a down window', () => {
+		const down: HistoryData = { ...historyUp, points: [{ t: 1, price: 300 }, { t: 2, price: 240 }] };
+		const json = getHistoryEmbed(down, 'stock').embed.toJSON();
+		expect(json.title).toContain('🔴');
+		expect(json.color).toBe(0xEF4444);
+		expect(json.description).toContain('-20.00%');
+	});
+
+	it('attaches a chart PNG and points the embed image at it', () => {
+		const result = getHistoryEmbed(historyUp, 'stock');
+		expect(result.files.length).toBe(1);
+		expect(result.embed.toJSON().image?.url).toMatch(/^attachment:\/\/chart-\d+\.png$/);
+	});
+
+	it('footer carries the timeframe label, type and source', () => {
+		const footer = getHistoryEmbed(historyUp, 'stock').embed.toJSON().footer!.text;
+		expect(footer).toContain('1Y');
+		expect(footer).toContain('stock');
+		expect(footer).toContain('yahoo');
+	});
+
+	it('uses the display name when provided', () => {
+		const json = getHistoryEmbed(historyUp, 'stock', 'QQQM Fund').embed.toJSON();
+		expect(json.title).toContain('QQQM Fund');
+		expect(json.title).toContain('(QQQM)');
+	});
+});
+
+describe('timeframe buttons', () => {
+	it('builds 8 timeframe buttons + 1 refresh across 2 rows', () => {
+		const rows = buildTimeframeRows('AAPL', 'stock', '1d');
+		expect(rows.length).toBe(2);
+		const buttons = rows.flatMap(r => r.toJSON().components);
+		expect(buttons.length).toBe(9);
+		// Last row carries the spare refresh slot (4 timeframes + refresh)
+		expect(rows[1].toJSON().components.length).toBe(5);
+	});
+
+	it('disables and highlights the active timeframe only (refresh stays enabled)', () => {
+		const buttons = buildTimeframeRows('AAPL', 'stock', '1y').flatMap(r => r.toJSON().components) as any[];
+		const active = buttons.filter(b => b.disabled);
+		expect(active.length).toBe(1);
+		expect(active[0].custom_id).toBe('asset_tf_1y_stock_AAPL');
+		// style 1 === ButtonStyle.Primary
+		expect(active[0].style).toBe(1);
+	});
+
+	it('emits a refresh button encoding the active range, never disabled', () => {
+		const buttons = buildTimeframeRows('AAPL', 'stock', '3m').flatMap(r => r.toJSON().components) as any[];
+		const refresh = buttons.find(b => b.custom_id?.startsWith('asset_refresh_'));
+		expect(refresh.custom_id).toBe('asset_refresh_3m_stock_AAPL');
+		expect(refresh.disabled).toBeFalsy();
+	});
+
+	it('parses the refresh prefix back into parts', () => {
+		expect(parseTimeframeCustomId('asset_refresh_1y_crypto_BTC')).toEqual({
+			range: '1y', type: 'crypto', symbol: 'BTC',
+		});
+	});
+
+	it('round-trips encode → parse for every type', () => {
+		for (const [sym, type] of [['AAPL', 'stock'], ['BTC', 'crypto'], ['WTI', 'commodity']] as const) {
+			const id = buildTimeframeRows(sym, type, '1d').flatMap(r => r.toJSON().components)
+				.map((b: any) => b.custom_id).find((c: string) => c.includes('_3m_'))!;
+			const parsed = parseTimeframeCustomId(id);
+			expect(parsed).toEqual({ range: '3m', type, symbol: sym });
+		}
+	});
+
+	it('parses a symbol that itself contains underscores', () => {
+		expect(parseTimeframeCustomId('asset_tf_5y_commodity_NATURAL_GAS')).toEqual({
+			range: '5y', type: 'commodity', symbol: 'NATURAL_GAS',
+		});
+	});
+
+	it('coerces an unknown type token to stock', () => {
+		expect(parseTimeframeCustomId('asset_tf_1m_etf_SPY')?.type).toBe('stock');
+	});
+
+	it('returns null for non-timeframe or malformed customIds', () => {
+		expect(parseTimeframeCustomId('flight_refresh_12')).toBeNull();
+		expect(parseTimeframeCustomId('asset_tf_1y')).toBeNull();
+		expect(parseTimeframeCustomId('asset_tf_1y_stock_')).toBeNull();
+	});
+});
+
+// A Yahoo chart response that satisfies both the live-quote path (meta price +
+// prev close) and the history path (timestamp + close arrays).
+function chartResponse() {
+	return {
+		ok: true,
+		json: () => Promise.resolve({
+			chart: { result: [{
+				meta: {
+					regularMarketPrice: 100,
+					chartPreviousClose: 95,
+					regularMarketDayHigh: 101,
+					regularMarketDayLow: 99,
+					longName: 'Test Co',
+				},
+				timestamp: [100, 200, 300],
+				indicators: { quote: [{ close: [96, 98, 100] }] },
+			}] },
+		}),
+	};
+}
+
+function yahooChartCalls(mock: ReturnType<typeof vi.fn>): number {
+	return mock.mock.calls.filter((c: unknown[]) => (c[0] as string).includes('v8/finance/chart')).length;
+}
+
+describe('resolveAssetView', () => {
+	beforeEach(() => {
+		vi.unstubAllGlobals();
+		clearPriceCache();
+		clearHistoryCache();
+		// No Finnhub key → live path uses Yahoo only, so every fetch is a chart call.
+		delete process.env.FINNHUB_API_KEY;
+	});
+
+	it('routes 1d to the live quote (footer carries source, not a range label)', async () => {
+		vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(chartResponse())));
+		const result = await resolveAssetView('SPY', 'stock', '1d');
+		expect(result).not.toBeNull();
+		const json = result!.embed.toJSON();
+		expect(json.title).toContain('SPY');
+		expect(json.footer!.text).toContain('yahoo');
+		expect(json.footer!.text).not.toContain('1D');
+	});
+
+	it('routes non-1d ranges to history (footer + description carry the range)', async () => {
+		vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(chartResponse())));
+		const result = await resolveAssetView('SPY', 'stock', '1y');
+		expect(result).not.toBeNull();
+		const json = result!.embed.toJSON();
+		expect(json.footer!.text).toContain('1Y');
+		expect(json.description).toContain('over 1Y');
+	});
+
+	it('returns null when the fetch yields nothing', async () => {
+		vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: false, status: 404 })));
+		expect(await resolveAssetView('NOPE', 'stock', '1y')).toBeNull();
+		expect(await resolveAssetView('NOPE', 'stock', '1d')).toBeNull();
+	});
+
+	it('propagates force to bypass the cache on refresh', async () => {
+		const fetchMock = vi.fn(() => Promise.resolve(chartResponse()));
+		vi.stubGlobal('fetch', fetchMock);
+		await resolveAssetView('SPY', 'stock', '1y');
+		const afterFirst = yahooChartCalls(fetchMock);
+		// Second call is served from cache — no new fetch
+		await resolveAssetView('SPY', 'stock', '1y');
+		expect(yahooChartCalls(fetchMock)).toBe(afterFirst);
+		// force=true refetches
+		await resolveAssetView('SPY', 'stock', '1y', true);
+		expect(yahooChartCalls(fetchMock)).toBeGreaterThan(afterFirst);
 	});
 });

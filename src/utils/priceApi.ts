@@ -241,9 +241,9 @@ export function clearPriceCache() {
 	priceCache.clear();
 }
 
-export async function getPrice(symbol: string): Promise<PriceData | null> {
+export async function getPrice(symbol: string, force = false): Promise<PriceData | null> {
 	const key = symbol.toUpperCase();
-	const cached = readCache(key);
+	const cached = force ? null : readCache(key);
 	if (cached) return cached;
 
 	const [yahoo, fundamentals] = await Promise.all([
@@ -287,9 +287,9 @@ export function normalizeSymbol(symbol: string, type: AssetType): string {
 	return up;
 }
 
-export async function getAssetPrice(symbol: string, type: AssetType): Promise<PriceData | null> {
+export async function getAssetPrice(symbol: string, type: AssetType, force = false): Promise<PriceData | null> {
 	const normalized = normalizeSymbol(symbol, type);
-	const data = await getPrice(normalized);
+	const data = await getPrice(normalized, force);
 	if (!data) return null;
 	return { ...data, symbol: symbol.toUpperCase(), query_symbol: normalized };
 }
@@ -347,6 +347,16 @@ async function fetchYahooHistory(symbol: string, yRange: string, interval: strin
 		}
 		if (points.length < 2) return null;
 
+		// Coarse intervals (weekly/monthly on 5y/all) leave the last candle days or
+		// weeks stale, so the headline price would lag reality. Append the live tick
+		// from the same response — no extra request — when it's newer than the last
+		// candle. Harmless on daily ranges (regularMarketTime ≈ today's candle).
+		const liveT = meta?.regularMarketTime;
+		const liveP = meta?.regularMarketPrice;
+		if (typeof liveP === 'number' && liveP > 0 && typeof liveT === 'number' && liveT > points[points.length - 1].t) {
+			points.push({ t: liveT, price: liveP });
+		}
+
 		const out: HistoryData = {
 			symbol: symbol.toUpperCase(),
 			range: yRange,
@@ -368,13 +378,17 @@ const historyCache = new Map<string, HistoryCacheEntry>();
 const HISTORY_TTL_MS = 5 * 60_000;
 const HISTORY_MAX = 200;
 
-export async function getHistory(symbol: string, range: string, type: AssetType): Promise<HistoryData | null> {
+export function clearHistoryCache() {
+	historyCache.clear();
+}
+
+export async function getHistory(symbol: string, range: string, type: AssetType, force = false): Promise<HistoryData | null> {
 	const conf = RANGE_INTERVAL[range];
 	if (!conf) return null;
 	const normalized = normalizeSymbol(symbol, type);
 	const cacheKey = `${normalized}:${range}`;
 
-	const hit = historyCache.get(cacheKey);
+	const hit = force ? undefined : historyCache.get(cacheKey);
 	if (hit && Date.now() - hit.ts < HISTORY_TTL_MS) return hit.data;
 
 	const fetched = await fetchYahooHistory(normalized, conf.range, conf.interval);

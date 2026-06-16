@@ -6,8 +6,7 @@ import { DiscordClient } from '../types';
 import { rateLimiter } from '../utils/rateLimiter';
 import logger from '../utils/logger';
 import { parseTradesCSV } from '../embeds/pnl-embeds';
-import { getAssetEmbed, getHistoryEmbed, buildTimeframeRows } from '../embeds/asset-embeds';
-import { getAssetPrice, getHistory, toAssetType } from '../utils/priceApi';
+import { resolveAssetView, buildTimeframeRows, parseTimeframeCustomId } from '../embeds/asset-embeds';
 import { getUniqueTradingDays, getRecapEmbed } from '../embeds/recap-embeds';
 import { Action, applyAction, newGame } from '../game/tetris/engine';
 import { renderButtons, renderEmbed } from '../game/tetris/render';
@@ -106,36 +105,27 @@ const interactionCreateEvent = {
 				return;
 			}
 
-			if (interaction.customId.startsWith('asset_tf_')) {
+			if (interaction.customId.startsWith('asset_tf_') || interaction.customId.startsWith('asset_refresh_')) {
 				if (!rateLimiter(interaction.user.id, 'asset_tf', 8, 15000)) {
 					await interaction.reply({ content: 'Slow down — try again in a few seconds.', flags: MessageFlags.Ephemeral });
 					return;
 				}
 
-				// customId: asset_tf_<range>_<type>_<symbol>. range/type/symbol never
-				// contain underscores, so two leading splits isolate the symbol intact.
-				const rest = interaction.customId.slice('asset_tf_'.length);
-				const i1 = rest.indexOf('_');
-				const range = rest.slice(0, i1);
-				const rest2 = rest.slice(i1 + 1);
-				const i2 = rest2.indexOf('_');
-				const type = toAssetType(rest2.slice(0, i2));
-				const symbol = rest2.slice(i2 + 1);
-				if (!symbol) return;
+				const parsed = parseTimeframeCustomId(interaction.customId);
+				if (!parsed) return;
+				const { range, type, symbol } = parsed;
+				// Refresh bypasses the price/history cache for a genuinely live pull.
+				const force = interaction.customId.startsWith('asset_refresh_');
 
 				try {
 					await interaction.deferUpdate();
-					const result = range === '1d'
-						? await (async () => {
-							const price = await getAssetPrice(symbol, type);
-							return price ? getAssetEmbed(price, type) : null;
-						})()
-						: await (async () => {
-							const hist = await getHistory(symbol, range, type);
-							return hist ? getHistoryEmbed(hist, type) : null;
-						})();
+					const result = await resolveAssetView(symbol, type, range, force);
 					if (!result) {
 						logger.warn(`asset timeframe fetch returned null (${symbol} ${range})`);
+						await interaction.followUp({
+							content: `Couldn't load **${symbol}** for that timeframe — try another.`,
+							flags: MessageFlags.Ephemeral,
+						});
 						return;
 					}
 					await interaction.editReply({
