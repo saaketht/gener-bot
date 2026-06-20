@@ -7,15 +7,14 @@
 
 A Discord bot exploring **event-driven architecture**, **third-party API integration**, and **real-time AI** — built with TypeScript and discord.js v14.
 
-Integrates Claude for AI chat and a text adventure game engine, Grok for image generation, real-time flight tracking, live market data, and a persistent SQLite-backed economy system.
+Integrates Grok for general AI chat and image generation, Claude for grounded financial chat and a text adventure game engine, real-time flight tracking, live market data, and a persistent SQLite-backed economy system.
 
 ## Tech Stack
 
 - **TypeScript** with strict type definitions and custom interfaces
 - **discord.js v14** — slash commands, message events, gateway events
-- **Claude Haiku 4.5** (Anthropic SDK) — AI chat with extended thinking
-- **Claude Sonnet** (Anthropic SDK) — text adventure game narration
-- **Grok** (xAI API) — AI image generation
+- **Grok** (xAI API) — general AI chat (vision, web search) and image generation
+- **Claude Sonnet 4.6** (Anthropic SDK) — grounded financial AI chat (live-price + web-search tools) and text adventure game narration
 - **Sequelize** + SQLite — persistent user economy (balance, shop, inventory) and flight tracking
 - **AeroDataBox** (RapidAPI) — real-time flight status with adaptive polling
 - **Finnhub + Yahoo Finance** — live stock, crypto, and commodity prices with rendered charts (intraday + historical timeframes)
@@ -33,7 +32,7 @@ Integrates Claude for AI chat and a text adventure game engine, Grok for image g
 - `/ping`, `/avatar`, `/server`, `/user` — Utility commands
 
 **Message Handlers** — Natural language triggers processed through a plugin-style event pipeline. Each handler implements the `MessageEvent` interface and is loaded dynamically — the bot listens to the message stream and each handler independently decides whether to act.
-- `ai <prompt>` — Claude Haiku 4.5 with extended thinking, env-configurable personality, per-user rate limiting
+- `ai <prompt>` — Dual-model chat: Grok for general questions (image understanding + web search), Claude Sonnet for financial queries (grounded with live prices + web search); rolling conversation context, env-configurable personality, per-user rate limiting
 - `ai-image <prompt>` — Grok image generation
 - `$TICKER` (e.g. `$spy`, `$btc`, `$oil`) — Live stock, crypto, and commodity quotes via Finnhub + Yahoo Finance, rendered as charts with interactive timeframe (`1d`–`all`) and refresh buttons
 - `weather <city>` — Current weather conditions
