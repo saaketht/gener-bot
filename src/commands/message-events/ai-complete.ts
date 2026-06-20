@@ -17,6 +17,7 @@ import { getUniqueTradingDays, getDaySummary, getRecapEmbed } from '../../embeds
 import { getAssetEmbed } from '../../embeds/asset-embeds';
 import { fetchFlightStatus } from '../../utils/flightApi';
 import { getFlightTrackingEmbed } from '../../embeds/flight-embeds';
+import { isToolLoopActive, getToolUses } from './toolLoop';
 
 const grok = new OpenAI({
 	apiKey: process.env.GROK_API_KEY!,
@@ -561,19 +562,26 @@ async function getClaudeFinancialResponse(
 	// bailed with no text. We now only execute blocks that have a client handler.
 	const MAX_TOOL_ROUNDS = 5;
 	let rounds = 0;
-	while ((response.stop_reason === 'tool_use' || response.stop_reason === 'pause_turn') && rounds < MAX_TOOL_ROUNDS) {
+	while (isToolLoopActive(response.stop_reason) && rounds < MAX_TOOL_ROUNDS) {
 		rounds++;
 		anthropicMessages.push({ role: 'assistant', content: response.content });
 
-		const clientToolUses = response.content.filter(
-			(b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && !!toolHandlers[b.name],
-		);
+		// Client-executed tools only (server_tool_use like web_search is excluded by
+		// getToolUses — the API runs it and we resume via the re-send below).
+		const toolUses = getToolUses(response.content);
 
-		if (clientToolUses.length > 0) {
+		if (toolUses.length > 0) {
 			const toolResults: Anthropic.ToolResultBlockParam[] = [];
-			for (const toolUse of clientToolUses) {
-				const result = await executeTool(toolUse.name, toolUse.input as Record<string, any>, ctx);
-				// Every client tool_use MUST get a matching tool_result or the next call 400s.
+			for (const toolUse of toolUses) {
+				let result: string | null;
+				if (toolHandlers[toolUse.name]) {
+					result = await executeTool(toolUse.name, toolUse.input as Record<string, any>, ctx);
+				}
+				else {
+					logger.warn(`claude requested tool_use with no handler: ${toolUse.name}`);
+					result = null;
+				}
+				// Every tool_use MUST get a matching tool_result or the next call 400s.
 				toolResults.push({
 					type: 'tool_result',
 					tool_use_id: toolUse.id,
@@ -583,8 +591,8 @@ async function getClaudeFinancialResponse(
 			}
 			anthropicMessages.push({ role: 'user', content: toolResults });
 		}
-		// else: server-side tool / pause_turn — assistant turn already appended; resume
-		// by re-sending without a synthetic user message.
+		// else: only server-side tool / pause_turn — assistant turn already appended;
+		// resume by re-sending without a synthetic user turn.
 
 		response = await claude.messages.create({
 			model: CLAUDE_MODEL,
