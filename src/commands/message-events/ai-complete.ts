@@ -28,7 +28,7 @@ const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 const MODEL = 'grok-4.20-0309-non-reasoning';
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const MAX_TOKENS = 512;
-const MAX_HISTORY = 20;
+const CLAUDE_MAX_TOKENS = 2048;
 const DEFAULT_PROMPT = 'You are generbot, a concise and direct AI assistant.';
 
 // Detect financial intent: $TICKER notation or explicit financial keywords
@@ -79,18 +79,26 @@ function chunkText(text: string, maxLen = 2000): string[] {
 	return chunks;
 }
 
-// Maps any bot message ID to the full completion text it was part of
+// Maps any bot message ID to the full completion text it was part of.
+// Used to recover the full (chunk-merged) answer when a user replies to a bot message.
+// In-memory + LRU + wiped on restart, so it is best-effort: replies fall back to the
+// replied-to message's own text when the entry has been evicted.
 const responseCache = new Map<string, string>();
-const CACHE_MAX = 50;
+const CACHE_MAX = 300;
 
-// Per-channel rolling chat history, used as fallback context when the user
-// doesn't reply directly to the bot. Keyed by channelId; turns are wrapped
-// in <msg from="..."> tags so the model can distinguish speakers.
+// Per-channel rolling chat history — the single source of conversational context for
+// both `ai` commands and replies. Deliberately keyed by channelId (shared across all
+// users in the channel): turns are wrapped in <msg from="..."> tags so the model can
+// attribute speakers, which is the desired behaviour for a shared-channel bot. Switch
+// the key to `${channelId}:${userId}` only if per-user isolation is ever wanted.
 type ChatModel = 'claude' | 'grok';
 type ChatTurn = { role: 'user' | 'assistant'; content: string; ts: number; model?: ChatModel };
 const channelHistory = new Map<string, ChatTurn[]>();
 const HISTORY_MAX_TURNS = 16;
-const HISTORY_TTL_MS = 30 * 60 * 1000;
+// Always keep at least the last HISTORY_FLOOR turns even if older than the TTL, so a
+// paused thread retains context (and sticky-model routing doesn't silently reset).
+const HISTORY_FLOOR = 4;
+const HISTORY_TTL_MS = 3 * 60 * 60 * 1000;
 
 function escapeXmlAttr(s: string): string {
 	return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -104,11 +112,23 @@ function wrapAssistant(text: string): string {
 	return `<msg from="generBot">${text}</msg>`;
 }
 
+// Short, single-line excerpt of a replied-to message, used to point the model at the
+// specific earlier turn a reply refers to. Strips any <msg> wrapper and collapses whitespace.
+function quoteExcerpt(text: string, maxLen = 300): string {
+	const clean = text
+		.replace(/<msg\s+from="[^"]*">/gi, '')
+		.replace(/<\/msg>/gi, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+	return clean.length > maxLen ? clean.slice(0, maxLen) + '…' : clean;
+}
+
 function getChannelHistory(channelId: string): ChatTurn[] {
 	const arr = channelHistory.get(channelId);
 	if (!arr) return [];
 	const cutoff = Date.now() - HISTORY_TTL_MS;
-	const fresh = arr.filter(t => t.ts >= cutoff);
+	const floorIdx = arr.length - HISTORY_FLOOR;
+	const fresh = arr.filter((t, i) => t.ts >= cutoff || i >= floorIdx);
 	if (fresh.length !== arr.length) {
 		if (fresh.length === 0) channelHistory.delete(channelId);
 		else channelHistory.set(channelId, fresh);
@@ -480,23 +500,6 @@ function extractImageUrls(msg: Message): string[] {
 	return imageUrls;
 }
 
-// Responses API format (Grok)
-function buildGrokContentParts(msg: Message): string | Array<Record<string, unknown>> {
-	const text = msg.content;
-	const imageUrls = extractImageUrls(msg);
-
-	if (imageUrls.length > 0) {
-		const parts: Array<Record<string, unknown>> = [];
-		for (const url of imageUrls) {
-			parts.push({ type: 'input_image', image_url: grokImageUrl(url) });
-		}
-		parts.push({ type: 'input_text', text });
-		return parts;
-	}
-
-	return text;
-}
-
 // Anthropic format (Claude)
 function buildClaudeContentParts(msg: Message): string | Anthropic.ContentBlockParam[] {
 	const text = msg.content;
@@ -512,60 +515,6 @@ function buildClaudeContentParts(msg: Message): string | Anthropic.ContentBlockP
 	}
 
 	return text;
-}
-
-// Walk the reply chain to build conversation history
-async function walkReplyChain(message: Message, botId: string): Promise<Array<{ role: string; content: any }>> {
-	const history: Array<{ role: string; content: any }> = [];
-	let current: Message | null = message;
-
-	while (current && history.length < MAX_HISTORY) {
-		const isBotMsg = current.author.id === botId;
-		const role = isBotMsg ? 'assistant' : 'user';
-		let content: any;
-
-		if (isBotMsg) {
-			// Use cached full response if available, otherwise just this message
-			const raw = responseCache.get(current.id) ?? current.content;
-			content = wrapAssistant(raw);
-		}
-		else {
-			// Strip "ai " prefix if present
-			const text = current.content.replace(/^ai\s+/i, '');
-			const wrapped = wrapUser(current.author.username, text);
-			const stripped = { ...current, content: wrapped } as Message;
-			content = buildGrokContentParts(stripped);
-		}
-
-		history.unshift({ role, content });
-
-		// Follow the reply reference
-		if (current.reference?.messageId) {
-			try {
-				current = await current.channel.messages.fetch(current.reference.messageId);
-			}
-			catch {
-				break;
-			}
-		}
-		else {
-			break;
-		}
-	}
-
-	// Merge consecutive same-role messages (bot sends multiple messages per response)
-	const merged: Array<{ role: string; content: any }> = [];
-	for (const msg of history) {
-		const last = merged[merged.length - 1];
-		if (last && last.role === msg.role && typeof last.content === 'string' && typeof msg.content === 'string') {
-			last.content += '\n' + msg.content;
-		}
-		else {
-			merged.push(msg);
-		}
-	}
-
-	return merged;
 }
 
 // Check if a reply chain leads back to a bot AI message
@@ -594,7 +543,7 @@ async function getClaudeFinancialResponse(
 
 	let response = await claude.messages.create({
 		model: CLAUDE_MODEL,
-		max_tokens: MAX_TOKENS,
+		max_tokens: CLAUDE_MAX_TOKENS,
 		system: systemPrompt,
 		messages: anthropicMessages,
 		tools: CLAUDE_TOOLS,
@@ -602,36 +551,44 @@ async function getClaudeFinancialResponse(
 
 	if (signal.aborted) return { text: '', sentEmbedIds: [] };
 
-	// Tool use loop — Claude may chain multiple tool calls (e.g. lookup_ticker → get_price → web_search)
+	// Tool loop. Two kinds of "not done yet":
+	//   - tool_use   → Claude called a client-side tool (lookup_ticker/get_price/...);
+	//                  we execute it and feed back a tool_result.
+	//   - pause_turn → a server-side tool (web_search) ran and the turn was paused;
+	//                  we re-send with NO new user turn and the API resumes automatically.
+	// web_search emits `server_tool_use` blocks (not `tool_use`), so the old
+	// `toolUseBlocks.every(...)` check treated a search-only turn as "server only" and
+	// bailed with no text. We now only execute blocks that have a client handler.
 	const MAX_TOOL_ROUNDS = 5;
 	let rounds = 0;
-	while (response.stop_reason === 'tool_use' && rounds < MAX_TOOL_ROUNDS) {
+	while ((response.stop_reason === 'tool_use' || response.stop_reason === 'pause_turn') && rounds < MAX_TOOL_ROUNDS) {
 		rounds++;
-		const toolUseBlocks = response.content.filter(
-			(b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
-		);
-
 		anthropicMessages.push({ role: 'assistant', content: response.content });
 
-		const serverOnly = toolUseBlocks.every(b => !toolHandlers[b.name]);
-		if (serverOnly) {
-			logger.info(`claude round ${rounds}: only server-side tools (${toolUseBlocks.map(b => b.name).join(', ')}), continuing`);
-			break;
-		}
+		const clientToolUses = response.content.filter(
+			(b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && !!toolHandlers[b.name],
+		);
 
-		const toolResults: Anthropic.ToolResultBlockParam[] = [];
-		for (const toolUse of toolUseBlocks) {
-			const result = await executeTool(toolUse.name, toolUse.input as Record<string, any>, ctx);
-			if (result === null) continue;
-			toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: result });
+		if (clientToolUses.length > 0) {
+			const toolResults: Anthropic.ToolResultBlockParam[] = [];
+			for (const toolUse of clientToolUses) {
+				const result = await executeTool(toolUse.name, toolUse.input as Record<string, any>, ctx);
+				// Every client tool_use MUST get a matching tool_result or the next call 400s.
+				toolResults.push({
+					type: 'tool_result',
+					tool_use_id: toolUse.id,
+					content: result ?? JSON.stringify({ error: `unknown tool: ${toolUse.name}` }),
+					...(result === null ? { is_error: true } : {}),
+				});
+			}
+			anthropicMessages.push({ role: 'user', content: toolResults });
 		}
-
-		if (toolResults.length === 0) break;
-		anthropicMessages.push({ role: 'user', content: toolResults });
+		// else: server-side tool / pause_turn — assistant turn already appended; resume
+		// by re-sending without a synthetic user message.
 
 		response = await claude.messages.create({
 			model: CLAUDE_MODEL,
-			max_tokens: MAX_TOKENS,
+			max_tokens: CLAUDE_MAX_TOKENS,
 			system: systemPrompt,
 			messages: anthropicMessages,
 			tools: CLAUDE_TOOLS,
@@ -642,6 +599,9 @@ async function getClaudeFinancialResponse(
 
 	if (rounds >= MAX_TOOL_ROUNDS) {
 		logger.warn(`claude hit max tool rounds (${MAX_TOOL_ROUNDS})`);
+	}
+	if (response.stop_reason === 'max_tokens') {
+		logger.warn(`claude hit max_tokens (${CLAUDE_MAX_TOKENS}); answer may be truncated`);
 	}
 
 	logger.info(`claude tokens used { input: ${response.usage.input_tokens}, output: ${response.usage.output_tokens} }, total: ${response.usage.input_tokens + response.usage.output_tokens}`);
@@ -702,20 +662,19 @@ const messageEvent: MessageEvent = {
 			return;
 		}
 
-		const userText = isAiCommand
+		const rawUserText = isAiCommand
 			? message.content.slice(3).trim()
 			: message.content.trim();
 
-		if (!userText) {
+		if (!rawUserText) {
 			await message.reply('usage: `ai <your question>`');
 			return;
 		}
 
-		const wrappedUserText = wrapUser(message.author.username, userText);
-
-		// Pull images from the replied-to message when using `ai` as a reply
+		// Fetch the replied-to message (for any reply, or `ai` used as a reply) — used both
+		// to quote it into the current turn and to pull its images.
 		let referencedMessage: Message | null = null;
-		if (isAiCommand && message.reference?.messageId) {
+		if ((isAiCommand || isReply) && message.reference?.messageId) {
 			try {
 				referencedMessage = await message.channel.messages.fetch(message.reference.messageId);
 			}
@@ -724,12 +683,29 @@ const messageEvent: MessageEvent = {
 			}
 		}
 
+		// Conversational history comes from the rolling channel buffer (see getChannelHistory).
+		// When this is a reply, fold an excerpt of the replied-to message into the current turn
+		// so the model knows which earlier message is being referenced — this works whether or
+		// not that message is still in the buffer window. Full text is recovered from
+		// responseCache when warm, else the replied-to message's own visible text.
+		let userText = rawUserText;
+		if (referencedMessage) {
+			const refFull = responseCache.get(referencedMessage.id) ?? referencedMessage.content;
+			const excerpt = quoteExcerpt(refFull);
+			if (excerpt) {
+				const who = referencedMessage.author.id === botId ? 'generBot' : referencedMessage.author.username;
+				userText = `(replying to ${who}: "${excerpt}")\n${rawUserText}`;
+			}
+		}
+
+		const wrappedUserText = wrapUser(message.author.username, userText);
+
 		const explicitFinancial = isFinancialQuery(message.content);
 		const stickyClaude = !explicitFinancial && lastChannelModel(channelId) === 'claude';
 		const financial = explicitFinancial || stickyClaude;
 		const routedModel = financial ? CLAUDE_MODEL : MODEL;
 		const routeNote = stickyClaude ? ' (sticky)' : '';
-		logger.info(`${message.author.username} ran ai [${routedModel}${routeNote}]: ${userText.substring(0, 50)}...`);
+		logger.info(`${message.author.username} ran ai [${routedModel}${routeNote}]: ${rawUserText.substring(0, 50)}...`);
 
 		const abortController = new AbortController();
 		activeGenerations.set(channelId, abortController);
@@ -747,14 +723,11 @@ const messageEvent: MessageEvent = {
 				// Financial query → Claude (grounded, no hallucination)
 				const systemPrompt = buildFinancialSystemPrompt(userContextStr);
 
-				// Prepend rolling per-channel history (text-only, image fidelity lost)
+				// Rolling per-channel history (text-only; current-turn images attached below)
 				const anthropicMessages: Anthropic.MessageParam[] = [];
 				const buffered = getChannelHistory(channelId);
 				for (const turn of buffered) {
 					anthropicMessages.push({ role: turn.role, content: turn.content });
-				}
-				if (buffered.length > 0) {
-					logger.info(`Conversation history (channel buffer): ${buffered.length} messages`);
 				}
 
 				// Collect images from both the current message and the replied-to message
@@ -777,6 +750,7 @@ const messageEvent: MessageEvent = {
 					);
 				}
 				anthropicMessages.push({ role: 'user', content: claudeContent });
+				logger.debug(`claude turns (${anthropicMessages.length}): ${anthropicMessages.map(m => m.role).join(',')}`);
 
 				const claudeResult = await getClaudeFinancialResponse(
 					systemPrompt,
@@ -792,49 +766,34 @@ const messageEvent: MessageEvent = {
 				// Chat/banter → Grok (Responses API with web search)
 				const systemPrompt = buildSystemPrompt(userContextStr);
 
-				// Build input array for Responses API
-				let input: any[];
+				// Conversation history from the rolling channel buffer — single source for
+				// both `ai` and replies. The replied-to message (if any) is already folded
+				// into wrappedUserText as a quote.
+				const input: any[] = [];
+				const buffered = getChannelHistory(channelId);
+				for (const turn of buffered) {
+					input.push({ role: turn.role, content: turn.content });
+				}
 
-				if (isReply) {
-					const history = await walkReplyChain(message, botId);
-					input = history.map(h => ({
-						role: h.role,
-						content: h.content,
-					}));
-					logger.info(`Conversation history (reply chain): ${history.length} messages`);
+				// Collect images from both the current message and the replied-to message
+				const refImages = referencedMessage ? extractImageUrls(referencedMessage) : [];
+				const userImages = extractImageUrls(message);
+				const allImages = [...refImages, ...userImages];
+
+				let userContent: string | Array<Record<string, unknown>>;
+				if (allImages.length > 0) {
+					const parts: Array<Record<string, unknown>> = [];
+					for (const url of allImages) {
+						parts.push({ type: 'input_image', image_url: grokImageUrl(url) });
+					}
+					parts.push({ type: 'input_text', text: wrappedUserText });
+					userContent = parts;
 				}
 				else {
-					input = [];
-
-					// Prepend rolling per-channel history (text-only, no image fidelity)
-					const buffered = getChannelHistory(channelId);
-					for (const turn of buffered) {
-						input.push({ role: turn.role, content: turn.content });
-					}
-					if (buffered.length > 0) {
-						logger.info(`Conversation history (channel buffer): ${buffered.length} messages`);
-					}
-
-					// Collect images from both the current message and the replied-to message
-					const refImages = referencedMessage ? extractImageUrls(referencedMessage) : [];
-					const userImages = extractImageUrls(message);
-					const allImages = [...refImages, ...userImages];
-
-					let userContent: string | Array<Record<string, unknown>>;
-					if (allImages.length > 0) {
-						const parts: Array<Record<string, unknown>> = [];
-						for (const url of allImages) {
-							parts.push({ type: 'input_image', image_url: grokImageUrl(url) });
-						}
-						parts.push({ type: 'input_text', text: wrappedUserText });
-						userContent = parts;
-					}
-					else {
-						userContent = wrappedUserText;
-					}
-
-					input.push({ role: 'user', content: userContent });
+					userContent = wrappedUserText;
 				}
+				input.push({ role: 'user', content: userContent });
+				logger.debug(`grok turns (${input.length}): ${input.map((t: any) => t.role).join(',')}`);
 
 				const guildId = message.guildId;
 				const ctx: ToolContext = { guildId, message, tickerCache: new Map(), sentEmbedIds: [] };
