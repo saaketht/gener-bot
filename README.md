@@ -18,7 +18,7 @@ Integrates Claude for AI chat and a text adventure game engine, Grok for image g
 - **Grok** (xAI API) — AI image generation
 - **Sequelize** + SQLite — persistent user economy (balance, shop, inventory) and flight tracking
 - **AeroDataBox** (RapidAPI) — real-time flight status with adaptive polling
-- **Alpha Vantage** (RapidAPI) — crypto, stock, and commodity prices
+- **Finnhub + Yahoo Finance** — live stock, crypto, and commodity prices with rendered charts (intraday + historical timeframes)
 - **Brave Search API** — image search
 - **Winston** — structured logging with sensitive data redaction
 - **Fuse.js** — fuzzy search for Warframe item lookups
@@ -35,9 +35,7 @@ Integrates Claude for AI chat and a text adventure game engine, Grok for image g
 **Message Handlers** — Natural language triggers processed through a plugin-style event pipeline. Each handler implements the `MessageEvent` interface and is loaded dynamically — the bot listens to the message stream and each handler independently decides whether to act.
 - `ai <prompt>` — Claude Haiku 4.5 with extended thinking, env-configurable personality, per-user rate limiting
 - `ai-image <prompt>` — Grok image generation
-- `bitcoin`, `ethereum`, `solana`, ... — Live crypto prices via Alpha Vantage
-- `spy`, `qqq` — Stock quotes with price and % change
-- `oil`, `gold` — Commodity prices
+- `$TICKER` (e.g. `$spy`, `$btc`, `$oil`) — Live stock, crypto, and commodity quotes via Finnhub + Yahoo Finance, rendered as charts with interactive timeframe (`1d`–`all`) and refresh buttons
 - `weather <city>` — Current weather conditions
 - `imagesearch [n] <query>` — Brave image search with optional result offset
 - `food` — Random food images by category (biryani, burger, pizza, etc.)

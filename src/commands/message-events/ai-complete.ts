@@ -444,8 +444,28 @@ async function executeTool(name: string, input: Record<string, any>, ctx: ToolCo
 	}
 }
 
-const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/jpg'];
-const IMAGE_URL_REGEX = /https?:\/\/\S+\.(?:jpg|jpeg|png)(?:\?\S*)?/gi;
+const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp', 'image/gif'];
+const IMAGE_URL_REGEX = /https?:\/\/\S+\.(?:jpg|jpeg|png|webp|gif)(?:\?\S*)?/gi;
+
+// Grok vision only accepts jpeg/png. Claude handles webp/gif natively, but for Grok
+// we rewrite Discord-hosted webp/gif to png via the media proxy's `format` param
+// (zero-cost server-side transcode). Non-Discord webp/gif URLs are passed as-is.
+const GROK_OK_EXT = /\.(?:jpe?g|png)(?:\?|$)/i;
+function grokImageUrl(url: string): string {
+	if (GROK_OK_EXT.test(url)) return url;
+	try {
+		const u = new URL(url);
+		if (u.hostname === 'cdn.discordapp.com' || u.hostname === 'media.discordapp.net') {
+			u.hostname = 'media.discordapp.net';
+			u.searchParams.set('format', 'png');
+			return u.toString();
+		}
+	}
+	catch {
+		// not a parseable URL — fall through and pass unchanged
+	}
+	return url;
+}
 
 function extractImageUrls(msg: Message): string[] {
 	const imageUrls: string[] = [];
@@ -468,7 +488,7 @@ function buildGrokContentParts(msg: Message): string | Array<Record<string, unkn
 	if (imageUrls.length > 0) {
 		const parts: Array<Record<string, unknown>> = [];
 		for (const url of imageUrls) {
-			parts.push({ type: 'input_image', image_url: url });
+			parts.push({ type: 'input_image', image_url: grokImageUrl(url) });
 		}
 		parts.push({ type: 'input_text', text });
 		return parts;
@@ -804,7 +824,7 @@ const messageEvent: MessageEvent = {
 					if (allImages.length > 0) {
 						const parts: Array<Record<string, unknown>> = [];
 						for (const url of allImages) {
-							parts.push({ type: 'input_image', image_url: url });
+							parts.push({ type: 'input_image', image_url: grokImageUrl(url) });
 						}
 						parts.push({ type: 'input_text', text: wrappedUserText });
 						userContent = parts;
