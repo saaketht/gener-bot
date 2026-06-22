@@ -25,11 +25,18 @@ export interface AssetEmbedResult {
 let chartCounter = 0;
 
 export function getAssetEmbed(price: PriceData, type: AssetType, displayName?: string): AssetEmbedResult {
+	// During an active extended session the headline price moves against the last
+	// regular close, not prev close — keep the dollar change and label in step with
+	// change_pct (which priceApi computes the same way).
+	const extLabel = price.session === 'pre' ? 'pre-market'
+		: price.session === 'post' ? 'after hours'
+			: null;
+	const baseline = extLabel && price.regular_close != null ? price.regular_close : price.prev_close;
 	const isUp = price.change_pct >= 0;
 	const arrow = isUp ? '🟢 ▲' : '🔴 ▼';
 	const sign = isUp ? '+' : '';
 	const color = isUp ? TYPE_COLORS[type].up : TYPE_COLORS[type].down;
-	const change = price.price - price.prev_close;
+	const change = price.price - baseline;
 
 	const name = displayName ?? price.name;
 	const titleName = name ? `${name} (${price.symbol})` : price.symbol;
@@ -41,7 +48,7 @@ export function getAssetEmbed(price: PriceData, type: AssetType, displayName?: s
 		.setTitle(`${titleName}  ${arrow} $${fmtPrice(price.price)}`)
 		.setURL(yahooUrl)
 		.setDescription(
-			`${isUp ? '🟢' : '🔴'} ${sign}$${fmtPrice(Math.abs(change))} (${sign}${price.change_pct.toFixed(2)}%) from prev close`,
+			`${isUp ? '🟢' : '🔴'} ${sign}$${fmtPrice(Math.abs(change))} (${sign}${price.change_pct.toFixed(2)}%) ${extLabel ?? 'from prev close'}`,
 		);
 
 	const files: AttachmentBuilder[] = [];

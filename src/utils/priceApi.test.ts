@@ -224,9 +224,9 @@ describe('getPrice', () => {
 		vi.setSystemTime(new Date((REG_END + 600) * 1000));
 		const postResponse = {
 			chart: { result: [{
-				meta: { ...yahooMeta, postMarketPrice: 600.10 },
-				timestamp: [REG_START],
-				indicators: { quote: [{ close: [593.25] }] },
+				meta: yahooMeta,
+				timestamp: [REG_START, REG_END + 600],
+				indicators: { quote: [{ close: [593.25, 600.10] }] },
 			}] },
 		};
 		const fetchMock = makeFetch(null, postResponse);
@@ -247,13 +247,13 @@ describe('getPrice', () => {
 		expect(result!.intraday!.regular_end).toBe(REG_END);
 	});
 
-	it('uses post-market price as headline when in post session', async () => {
+	it('derives post-market headline from the post-session intraday bars', async () => {
 		vi.setSystemTime(new Date((REG_END + 600) * 1000));
 		const postResponse = {
 			chart: { result: [{
-				meta: { ...yahooMeta, postMarketPrice: 600.10 },
-				timestamp: [REG_START],
-				indicators: { quote: [{ close: [593.25] }] },
+				meta: yahooMeta,
+				timestamp: [REG_START, REG_END + 300, REG_END + 600],
+				indicators: { quote: [{ close: [593.25, 599.0, 600.10] }] },
 			}] },
 		};
 		vi.stubGlobal('fetch', makeFetch(null, postResponse));
@@ -261,7 +261,27 @@ describe('getPrice', () => {
 		expect(result!.price).toBe(600.10);
 		expect(result!.regular_close).toBe(593.25);
 		expect(result!.post_market_price).toBe(600.10);
+		// Change is measured against the regular close, not prev close.
+		expect(result!.change_pct).toBeCloseTo(((600.10 - 593.25) / 593.25) * 100, 5);
 		expect(result!.session).toBe('post');
+	});
+
+	it('derives pre-market headline from the pre-session intraday bars', async () => {
+		vi.setSystemTime(new Date((PRE_START + 600) * 1000));
+		const preResponse = {
+			chart: { result: [{
+				meta: yahooMeta,
+				timestamp: [PRE_START, PRE_START + 300, PRE_START + 600],
+				indicators: { quote: [{ close: [585.0, 584.0, 583.5] }] },
+			}] },
+		};
+		vi.stubGlobal('fetch', makeFetch(null, preResponse));
+		const result = await getPrice('SPY');
+		expect(result!.price).toBe(583.5);
+		expect(result!.pre_market_price).toBe(583.5);
+		expect(result!.regular_close).toBe(593.25);
+		expect(result!.change_pct).toBeCloseTo(((583.5 - 593.25) / 593.25) * 100, 5);
+		expect(result!.session).toBe('pre');
 	});
 
 	it('falls back to Finnhub when Yahoo fails', async () => {

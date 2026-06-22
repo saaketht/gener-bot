@@ -34,7 +34,7 @@ readMessageEvents().then((messageEvents) => {
 				await messageEvent.execute(message);
 			}
 			catch (err) {
-				console.error(`[messageCreate] error in ${messageEvent.name}:`, err);
+				console.error(`[messageCreate] error in ${messageEvent?.name}:`, err);
 			}
 		}
 	});

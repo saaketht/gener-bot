@@ -73,6 +73,23 @@ async function fetchFinnhub(symbol: string): Promise<PriceData | null> {
 	}
 }
 
+// Latest non-null close inside [start, end). Used to recover extended-hours
+// prints from the intraday series, since Yahoo's chart meta omits them.
+function lastCloseInWindow(
+	timestamps: number[],
+	closes: (number | null)[],
+	start?: number,
+	end?: number,
+): number | undefined {
+	if (start == null || end == null) return undefined;
+	let val: number | undefined;
+	for (let i = 0; i < timestamps.length; i++) {
+		const c = closes[i];
+		if (c != null && c > 0 && timestamps[i] >= start && timestamps[i] < end) val = c;
+	}
+	return val;
+}
+
 function deriveSession(meta: any, nowSec: number): Session {
 	const tp = meta?.currentTradingPeriod;
 	if (!tp) return 'regular';
@@ -103,22 +120,38 @@ async function fetchYahoo(symbol: string): Promise<PriceData | null> {
 			return null;
 		}
 
-		const pre = meta.preMarketPrice && meta.preMarketPrice > 0 ? meta.preMarketPrice : undefined;
-		const post = meta.postMarketPrice && meta.postMarketPrice > 0 ? meta.postMarketPrice : undefined;
+		const timestamps: number[] | undefined = result?.timestamp;
+		const closes: (number | null)[] | undefined = result?.indicators?.quote?.[0]?.close;
+		const tp = meta?.currentTradingPeriod;
+		const reg = tp?.regular;
+
+		// Yahoo's chart meta exposes no preMarketPrice/postMarketPrice — the only
+		// place extended-hours prints live is the intraday close series (it carries
+		// pre/post bars because of includePrePost=true). Recover the latest print in
+		// each window. Bounding by the actual pre/post windows means stale data
+		// (e.g. last Friday's bars while currentTradingPeriod already points at
+		// Monday) isn't misattributed as a live extended-hours quote.
+		const pre = (timestamps && closes)
+			? lastCloseInWindow(timestamps, closes, tp?.pre?.start, reg?.start)
+			: undefined;
+		const post = (timestamps && closes)
+			? lastCloseInWindow(timestamps, closes, reg?.end, tp?.post?.end)
+			: undefined;
 
 		const nowSec = Math.floor(Date.now() / 1000);
 		const session = deriveSession(meta, nowSec);
 
-		// Headline price: prefer the active extended-hours print, otherwise regular.
-		let price = regular;
-		if (session === 'post' && post) price = post;
-		else if (session === 'pre' && pre) price = pre;
-		else if (session === 'closed' && post) price = post;
+		// Headline price + the baseline its change is measured against. During an
+		// active extended session the print is measured against the last regular
+		// close (Yahoo's big colored extended number); otherwise against prev close.
+		const extPrice = session === 'pre' ? pre : session === 'post' ? post : undefined;
+		const price = extPrice ?? regular;
+		const baseline = extPrice ? regular : prevClose;
 
 		const out: PriceData = {
 			symbol: symbol.toUpperCase(),
 			price,
-			change_pct: ((price - prevClose) / prevClose) * 100,
+			change_pct: baseline ? ((price - baseline) / baseline) * 100 : 0,
 			high: meta.regularMarketDayHigh ?? 0,
 			low: meta.regularMarketDayLow ?? 0,
 			prev_close: prevClose,
@@ -135,9 +168,6 @@ async function fetchYahoo(symbol: string): Promise<PriceData | null> {
 		if (pre) out.pre_market_price = pre;
 		if (post) out.post_market_price = post;
 
-		const timestamps: number[] | undefined = result?.timestamp;
-		const closes: (number | null)[] | undefined = result?.indicators?.quote?.[0]?.close;
-		const reg = meta?.currentTradingPeriod?.regular;
 		if (timestamps && closes && timestamps.length === closes.length && reg) {
 			out.intraday = {
 				timestamps,

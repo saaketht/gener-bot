@@ -24,7 +24,7 @@ const readCommands = async (): Promise<Command[]> => {
 
 		const command: Command = (await import(`../commands/slash/${fileNoExt}`))
 			.default as Command;
-		commands.push(command);
+		if (command) commands.push(command);
 	}
 	return commands;
 };
@@ -48,7 +48,7 @@ const readEvents = async (): Promise<DiscordEvent[]> => {
 
 		const event: DiscordEvent = (await import(`../events/${fileNoExt}`))
 			.default as DiscordEvent;
-		events.push(event);
+		if (event) events.push(event);
 	}
 	return events;
 };
@@ -72,7 +72,9 @@ const readMessageEvents = async (): Promise<MessageEvent[]> => {
 
 		const messageEvent: MessageEvent = (await import(`../commands/message-events/${fileNoExt}`))
 			.default as MessageEvent;
-		messageEvents.push(messageEvent);
+		// Helper modules (e.g. toolLoop) live in this dir but export no default —
+		// skip them so they don't end up as undefined entries in the handler loop.
+		if (messageEvent) messageEvents.push(messageEvent);
 	}
 	return messageEvents;
 };

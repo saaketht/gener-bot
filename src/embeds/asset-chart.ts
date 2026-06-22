@@ -117,32 +117,36 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 		ctx.fillText(sessionLabel, tagX + (38 - ctx.measureText(sessionLabel).width) / 2, 56);
 	}
 
-	// Headline change uses regular session vs prev close so the percent is stable
-	// across extended hours (the price tag tells you what session is live).
-	const headlineRef = price.regular_close ?? price.price;
-	const regChange = headlineRef - price.prev_close;
-	const regPct = (regChange / price.prev_close) * 100;
-	const regArrow = regChange >= 0 ? '▲' : '▼';
-	const regSign = regChange >= 0 ? '+' : '-';
-	ctx.fillStyle = regChange >= 0 ? palette.line : TYPE_PALETTE[type].down.line;
+	const extPrice = price.session === 'pre' ? price.pre_market_price
+		: price.session === 'post' ? price.post_market_price
+			: undefined;
+	const extActive = extPrice != null && price.regular_close != null;
+
+	// Big headline change is measured against whatever the headline price prints
+	// against — the last regular close during an extended session, else prev close
+	// — so the prominent number and its change always agree.
+	const headBase = extActive ? price.regular_close! : price.prev_close;
+	const headChange = price.price - headBase;
+	const headPct = headBase ? (headChange / headBase) * 100 : 0;
+	const headArrow = headChange >= 0 ? '▲' : '▼';
+	const headSign = headChange >= 0 ? '+' : '-';
+	ctx.fillStyle = headChange >= 0 ? palette.line : TYPE_PALETTE[type].down.line;
 	ctx.font = '18px Inter';
 	ctx.fillText(
-		`${regArrow} ${regSign}$${fmt(Math.abs(regChange))}  (${regSign}${Math.abs(regPct).toFixed(2)}%)`,
+		`${headArrow} ${headSign}$${fmt(Math.abs(headChange))}  (${headSign}${Math.abs(headPct).toFixed(2)}%)`,
 		28, 92,
 	);
 
-	const extPrice = price.session === 'post' ? price.post_market_price
-		: price.session === 'pre' ? price.pre_market_price
-			: undefined;
-	if (extPrice && price.regular_close) {
-		const extChange = extPrice - price.regular_close;
-		const extPct = (extChange / price.regular_close) * 100;
-		const extSign = extChange >= 0 ? '+' : '-';
-		const label = price.session === 'post' ? 'after hours' : 'pre-market';
+	// Secondary line during extended hours: the regular-session close the extended
+	// price is trading away from.
+	if (extActive) {
+		const regChange = price.regular_close! - price.prev_close;
+		const regPct = price.prev_close ? (regChange / price.prev_close) * 100 : 0;
+		const regSign = regChange >= 0 ? '+' : '-';
 		ctx.fillStyle = COLORS.dim;
 		ctx.font = '13px Inter';
 		ctx.fillText(
-			`${label}  ${extSign}$${fmt(Math.abs(extChange))} (${extSign}${Math.abs(extPct).toFixed(2)}%)`,
+			`at close  $${fmtPrice(price.regular_close!)}  ${regSign}$${fmt(Math.abs(regChange))} (${regSign}${Math.abs(regPct).toFixed(2)}%)`,
 			28, 112,
 		);
 	}
