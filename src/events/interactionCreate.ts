@@ -8,10 +8,6 @@ import logger from '../utils/logger';
 import { parseTradesCSV } from '../embeds/pnl-embeds';
 import { resolveAssetView, buildTimeframeRows, parseTimeframeCustomId } from '../embeds/asset-embeds';
 import { getUniqueTradingDays, getRecapEmbed } from '../embeds/recap-embeds';
-import { Action, applyAction, newGame } from '../game/tetris/engine';
-import { renderButtons, renderEmbed } from '../game/tetris/render';
-import { endSession, tetrisSessions, userActiveGames } from '../game/tetris/sessions';
-import { startGravity, stopGravity } from '../game/tetris/loop';
 
 const interactionCreateEvent = {
 	name: 'interactionCreate',
@@ -50,57 +46,6 @@ const interactionCreateEvent = {
 				}
 				catch (error) {
 					logger.error('Error handling recap detail toggle', { error });
-				}
-				return;
-			}
-
-			if (interaction.customId.startsWith('tetris_')) {
-				const msgId = interaction.message.id;
-				const session = tetrisSessions.get(msgId);
-				const action = interaction.customId.replace('tetris_', '');
-
-				if (!session) {
-					await interaction.reply({ content: 'this game has expired', flags: MessageFlags.Ephemeral });
-					return;
-				}
-				if (interaction.user.id !== session.state.ownerId) {
-					await interaction.reply({ content: `only <@${session.state.ownerId}> can play this game`, flags: MessageFlags.Ephemeral });
-					return;
-				}
-
-				stopGravity(session);
-
-				try {
-					if (action === 'quit') {
-						session.state.gameOver = true;
-						await interaction.update({ embeds: [renderEmbed(session.state)], components: renderButtons(session.state) });
-						endSession(msgId, 'quit');
-						return;
-					}
-					if (action === 'new') {
-						const fresh = newGame(session.state.ownerId);
-						session.state = fresh;
-						userActiveGames.set(fresh.ownerId, msgId);
-						await interaction.update({ embeds: [renderEmbed(fresh)], components: renderButtons(fresh) });
-						startGravity(session);
-						return;
-					}
-
-					const valid: Action[] = ['left', 'right', 'rotCW', 'rotCCW', 'soft', 'hard'];
-					if (!valid.includes(action as Action)) {
-						await interaction.deferUpdate();
-						startGravity(session);
-						return;
-					}
-					applyAction(session.state, action as Action);
-					await interaction.update({ embeds: [renderEmbed(session.state)], components: renderButtons(session.state) });
-
-					if (session.state.gameOver) endSession(msgId, 'gameover');
-					else startGravity(session);
-				}
-				catch (error) {
-					logger.error(`tetris button error (msg=${msgId}, action=${action})`, { error });
-					startGravity(session);
 				}
 				return;
 			}
