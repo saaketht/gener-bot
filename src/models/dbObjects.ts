@@ -22,8 +22,11 @@ const Users = users(sequelize);
 const TrackedFlights = trackedFlights(sequelize);
 const UserProfiles = userProfiles(sequelize);
 const WatchedTickers = watchedTickers(sequelize);
-// auto-create missing tables and add new columns to existing tables at startup
-sequelize.sync({ alter: true }).then(() => {
+// auto-create missing tables at startup. NOT { alter: true } — on SQLite that
+// rebuilds every table via a copy-to-backup dance on each boot, which corrupts
+// autoincrement PKs and crashes (see the tetris_scores incident). Add columns to
+// existing tables via explicit one-shot migrations below instead.
+sequelize.sync().then(() => {
 	// One-shot migration: collapse legacy 'etf' rows into 'stock' (idempotent).
 	WatchedTickers.update({ type: 'stock' }, { where: { type: 'etf' } });
 });
