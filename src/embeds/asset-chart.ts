@@ -22,6 +22,121 @@ const COLORS = {
 	extBg: 'rgba(255,255,255,0.025)',
 };
 
+export type ChartMode = 'line' | 'candle';
+
+// Beyond this many bars the candle wicks render thinner than a pixel and turn to
+// mush, so the renderer auto-falls back to a line. Exported so the button layer
+// can predict which timeframes get a usable candle view.
+export const MAX_CANDLES = 150;
+
+// Ranges that stay candle-capable. 1y/5y/all carry ~250+ bars → always line.
+// (1d is intraday and handled separately.) The renderer's pts.length cap is the
+// real safety net; this is the cheap predicate for enabling the toggle button.
+export function candleAllowed(range: string): boolean {
+	return !['1y', '5y', 'all'].includes(range);
+}
+
+interface Candle {
+	t: number;
+	open: number;
+	high: number;
+	low: number;
+	close: number;
+	volume?: number;
+}
+
+// Bottom-band volume histogram drawn BEHIND the price, scaled to its own band so
+// a spike can't occlude the series. Each bar is tinted by its candle's direction
+// (up/down color) at low alpha so it reads as context, not a second series.
+function drawVolumeOverlay(
+	ctx: any, candles: Candle[], xScale: (t: number) => number,
+	chartX: number, chartY: number, chartW: number, chartH: number,
+	upColor: string, downColor: string,
+) {
+	const vMax = Math.max(...candles.map(c => c.volume ?? 0));
+	if (vMax <= 0) return;
+	const bandH = chartH * 0.34;
+	const slot = chartW / candles.length;
+	const w = Math.max(1, Math.min(slot * 0.7, 14));
+	for (const c of candles) {
+		if (!c.volume) continue;
+		const h = (c.volume / vMax) * bandH;
+		ctx.fillStyle = hexToRgba(c.close >= c.open ? upColor : downColor, 0.3);
+		ctx.fillRect(xScale(c.t) - w / 2, chartY + chartH - h, w, h);
+	}
+}
+
+function drawCandles(
+	ctx: any, candles: Candle[], xScale: (t: number) => number, yScale: (v: number) => number,
+	upColor: string, downColor: string, chartW: number,
+) {
+	const slot = chartW / candles.length;
+	const w = Math.max(1, Math.min(slot * 0.7, 14));
+	for (const c of candles) {
+		const col = c.close >= c.open ? upColor : downColor;
+		const x = xScale(c.t);
+		ctx.strokeStyle = col;
+		ctx.lineWidth = 1;
+		ctx.beginPath();
+		ctx.moveTo(x, yScale(c.high));
+		ctx.lineTo(x, yScale(c.low));
+		ctx.stroke();
+		const yo = yScale(c.open), yc = yScale(c.close);
+		ctx.fillStyle = col;
+		ctx.fillRect(x - w / 2, Math.min(yo, yc), w, Math.max(1, Math.abs(yc - yo)));
+	}
+}
+
+// Price labels inside the plot at the right edge, each on a panel-colored backing
+// so it stays legible where the price line/candles cross it. Drawn last (on top).
+// Shared so both renderers align.
+function drawYLabels(
+	ctx: any, chartX: number, chartY: number, chartW: number, chartH: number,
+	yMax: number, ySpan: number,
+) {
+	ctx.font = '11px Inter';
+	ctx.textAlign = 'right';
+	for (let g = 0; g <= 4; g++) {
+		const y = chartY + (chartH / 4) * g;
+		const label = `$${fmtPrice(yMax - (ySpan / 4) * g)}`;
+		const lw = ctx.measureText(label).width;
+		ctx.fillStyle = COLORS.panel;
+		ctx.fillRect(chartX + chartW - lw - 8, y - 13, lw + 8, 14);
+		ctx.fillStyle = COLORS.dim;
+		ctx.fillText(label, chartX + chartW - 4, y - 3);
+	}
+	ctx.textAlign = 'left';
+}
+
+interface StripFundamentals {
+	market_cap?: number;
+	pe_ratio?: number;
+	dividend_yield?: number;
+	next_earnings?: number;
+}
+
+// One compact dim line of company identity, identical on every view (live or any
+// timeframe). Omits missing fields, so ETFs/crypto/commodities show a shorter
+// strip or none at all rather than gaps.
+function drawFundamentalsStrip(ctx: any, fund: StripFundamentals, x: number, y: number) {
+	const segs: string[] = [];
+	if (fund.market_cap) segs.push(`MKT CAP  $${fmtCompact(fund.market_cap)}`);
+	if (typeof fund.pe_ratio === 'number') {
+		const s = fund.pe_ratio < 0 ? '−' : '';
+		segs.push(`P/E  ${s}${Math.abs(fund.pe_ratio).toFixed(1)}`);
+	}
+	if (typeof fund.dividend_yield === 'number') segs.push(`DIV  ${fund.dividend_yield.toFixed(2)}%`);
+	if (fund.next_earnings) {
+		const d = new Date(fund.next_earnings * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+		segs.push(`NEXT ER  ${d}`);
+	}
+	if (!segs.length) return;
+	ctx.font = '12.5px Inter';
+	ctx.fillStyle = COLORS.dim;
+	ctx.textAlign = 'left';
+	ctx.fillText(segs.join('      ·      '), x, y);
+}
+
 interface TypeColors {
 	line: string;
 	lineDim: string;
@@ -61,9 +176,15 @@ function fmtCompact(v: number): string {
 	return v.toFixed(0);
 }
 
+function hexToRgba(hex: string, a: number): string {
+	const n = parseInt(hex.replace('#', ''), 16);
+	return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
 interface CleanedPoint {
 	t: number;
 	price: number;
+	volume?: number;
 }
 
 function cleanSeries(intraday: IntradaySeries): CleanedPoint[] {
@@ -71,12 +192,13 @@ function cleanSeries(intraday: IntradaySeries): CleanedPoint[] {
 	for (let i = 0; i < intraday.timestamps.length; i++) {
 		const c = intraday.closes[i];
 		if (c == null) continue;
-		pts.push({ t: intraday.timestamps[i], price: c });
+		const v = intraday.volumes?.[i];
+		pts.push({ t: intraday.timestamps[i], price: c, volume: v == null ? undefined : v });
 	}
 	return pts;
 }
 
-export function renderAssetChart(price: PriceData, type: AssetType, displayName?: string): Buffer | null {
+export function renderAssetChart(price: PriceData, type: AssetType, displayName?: string, mode: ChartMode = 'line'): Buffer | null {
 	if (!price.intraday) return null;
 	const series = cleanSeries(price.intraday);
 	if (series.length < 2) return null;
@@ -147,23 +269,19 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 		ctx.font = '13px Inter';
 		ctx.fillText(
 			`at close  $${fmtPrice(price.regular_close!)}  ${regSign}$${fmt(Math.abs(regChange))} (${regSign}${Math.abs(regPct).toFixed(2)}%)`,
-			28, 112,
+			28, 108,
 		);
 	}
 
-	// Right-side stat list: label left-aligned, value right-aligned, one per row.
-	// Negative P/E is meaningful (unprofitable company) so render it with a sign
-	// rather than dropping it.
+	// Right-side stat list — price action for the current window. Company identity
+	// (mkt cap / P/E / div / earnings) lives in the fundamentals strip so the list
+	// is identical across the live and history views.
 	const stats: Array<{ label: string; value: string }> = [
 		{ label: 'PREV CLOSE', value: `$${fmtPrice(price.prev_close)}` },
 	];
 	if (price.open) stats.push({ label: 'OPEN', value: `$${fmtPrice(price.open)}` });
-	if (price.volume) stats.push({ label: 'VOLUME', value: fmtCompact(price.volume) });
-	if (price.market_cap) stats.push({ label: 'MKT CAP', value: `$${fmtCompact(price.market_cap)}` });
-	if (typeof price.pe_ratio === 'number') {
-		const sign = price.pe_ratio < 0 ? '−' : '';
-		stats.push({ label: 'P/E', value: `${sign}${Math.abs(price.pe_ratio).toFixed(1)}` });
-	}
+	if (price.high > 0) stats.push({ label: 'HIGH', value: `$${fmtPrice(price.high)}` });
+	if (price.low > 0) stats.push({ label: 'LOW', value: `$${fmtPrice(price.low)}` });
 
 	const statsRight = W - 28;
 	const statsLeft = statsRight - 170;
@@ -185,6 +303,13 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 	const chartX = 28, chartY = 130, chartW = W - 56, chartH = 170;
 	ctx.fillStyle = COLORS.panel;
 	ctx.fillRect(chartX, chartY, chartW, chartH);
+
+	// Candle bodies derived from consecutive closes (intraday series has no real
+	// per-bar OHLC); volume rides the intraday volume array.
+	const candles: Candle[] = series.map((p, i) => {
+		const open = i === 0 ? p.price : series[i - 1].price;
+		return { t: p.t, open, high: Math.max(open, p.price), low: Math.min(open, p.price), close: p.price, volume: p.volume };
+	});
 
 	const tMin = series[0].t;
 	const tMax = series[series.length - 1].t;
@@ -277,29 +402,38 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 		ctx.stroke();
 	}
 
-	fillSlice(preSlice, palette.fillDim);
-	fillSlice(regSlice, palette.fill);
-	fillSlice(postSlice, palette.fillDim);
-	strokeSlice(preSlice, palette.lineDim, 1.6);
-	strokeSlice(regSlice, palette.line, 2.2);
-	strokeSlice(postSlice, palette.lineDim, 1.6);
+	if (mode === 'candle') {
+		drawVolumeOverlay(ctx, candles, xScale, chartX, chartY, chartW, chartH, palette.line, TYPE_PALETTE[type].down.line);
+		drawCandles(ctx, candles, xScale, yScale, palette.line, TYPE_PALETTE[type].down.line, chartW);
+	}
+	else {
+		fillSlice(preSlice, palette.fillDim);
+		fillSlice(regSlice, palette.fill);
+		fillSlice(postSlice, palette.fillDim);
+		strokeSlice(preSlice, palette.lineDim, 1.6);
+		strokeSlice(regSlice, palette.line, 2.2);
+		strokeSlice(postSlice, palette.lineDim, 1.6);
 
-	// End dot at last actual point
-	const lastPt = series[series.length - 1];
-	const inExt = lastPt.t < regStart || lastPt.t > regEnd;
-	ctx.fillStyle = palette.line;
-	ctx.beginPath();
-	ctx.arc(xScale(lastPt.t), yScale(lastPt.price), inExt ? 3 : 4.5, 0, Math.PI * 2);
-	ctx.fill();
-	if (inExt) {
-		ctx.strokeStyle = palette.lineDim;
-		ctx.lineWidth = 1.5;
+		// End dot at last actual point
+		const lastPt = series[series.length - 1];
+		const inExt = lastPt.t < regStart || lastPt.t > regEnd;
+		ctx.fillStyle = palette.line;
 		ctx.beginPath();
-		ctx.arc(xScale(lastPt.t), yScale(lastPt.price), 5, 0, Math.PI * 2);
-		ctx.stroke();
+		ctx.arc(xScale(lastPt.t), yScale(lastPt.price), inExt ? 3 : 4.5, 0, Math.PI * 2);
+		ctx.fill();
+		if (inExt) {
+			ctx.strokeStyle = palette.lineDim;
+			ctx.lineWidth = 1.5;
+			ctx.beginPath();
+			ctx.arc(xScale(lastPt.t), yScale(lastPt.price), 5, 0, Math.PI * 2);
+			ctx.stroke();
+		}
 	}
 
-	// Day & 52wk range tracks
+	// Y-axis price labels inside the plot at the right edge
+	drawYLabels(ctx, chartX, chartY, chartW, chartH, yMax, ySpan);
+
+	// Day & 52wk range tracks (line mode only — candle mode shows OHLC + volume)
 	function drawRangeBar(label: string, lo: number, hi: number, cur: number, y: number) {
 		ctx.fillStyle = COLORS.dim;
 		ctx.font = '12px Inter';
@@ -318,7 +452,9 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 		ctx.fillRect(chartX + pos - 1.5, y - 2, 3, trackH + 4);
 	}
 
-	const barY = chartY + chartH + 28;
+	// Range bars show in both modes — volume is an in-panel overlay now, so the
+	// space below the chart is free regardless of line vs candle.
+	const barY = chartY + chartH + 24;
 	if (price.low > 0 && price.high > price.low) {
 		drawRangeBar(
 			`DAY  L $${fmtPrice(price.low)} → H $${fmtPrice(price.high)}`,
@@ -328,9 +464,11 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 	if (price.week52_low && price.week52_high && price.week52_high > price.week52_low) {
 		drawRangeBar(
 			`52WK  $${fmtPrice(price.week52_low)} → $${fmtPrice(price.week52_high)}`,
-			price.week52_low, price.week52_high, price.price, barY + 38,
+			price.week52_low, price.week52_high, price.price, barY + 34,
 		);
 	}
+
+	drawFundamentalsStrip(ctx, price, 28, 122);
 
 	return canvas.toBuffer('image/png');
 }
@@ -352,9 +490,12 @@ function formatAxisDate(tSec: number, spanDays: number): string {
 // no session bands or extended-hours styling (irrelevant beyond 1d). Change and
 // the dashed baseline are measured from the first point of the window, so the
 // percent reflects the selected timeframe rather than yesterday's close.
-export function renderHistoryChart(data: HistoryData, type: AssetType, displayName?: string): Buffer | null {
+export function renderHistoryChart(data: HistoryData, type: AssetType, displayName?: string, mode: ChartMode = 'line'): Buffer | null {
 	const pts = data.points;
 	if (pts.length < 2) return null;
+
+	// Density cap: beyond MAX_CANDLES the candles smear, so fall back to a line.
+	const effMode: ChartMode = mode === 'candle' && pts.length <= MAX_CANDLES ? 'candle' : 'line';
 
 	const first = pts[0].price;
 	const last = pts[pts.length - 1].price;
@@ -399,18 +540,24 @@ export function renderHistoryChart(data: HistoryData, type: AssetType, displayNa
 	const sign = isUp ? '+' : '-';
 	ctx.fillStyle = isUp ? palette.line : downColor;
 	ctx.font = '18px Inter';
-	ctx.fillText(`${arrow} ${sign}$${fmt(Math.abs(change))}  (${sign}${Math.abs(pct).toFixed(2)}%)`, 28, 92);
+	const changeText = `${arrow} ${sign}$${fmt(Math.abs(change))}  (${sign}${Math.abs(pct).toFixed(2)}%)`;
+	ctx.fillText(changeText, 28, 92);
+	// "over <range>" sits next to the change rather than on its own line
+	const changeW = ctx.measureText(changeText).width;
 	ctx.fillStyle = COLORS.dim;
 	ctx.font = '13px Inter';
-	ctx.fillText(`over ${rangeLabel}`, 28, 112);
+	ctx.fillText(`over ${rangeLabel}`, 28 + changeW + 12, 92);
 
 	const prices = pts.map(p => p.price);
 	const hi = Math.max(...prices);
 	const lo = Math.min(...prices);
+	// Same four labels as the live view; values are window-relative (the dashed
+	// baseline and "over <range>" header make clear PREV CLOSE = window start).
 	const stats: Array<{ label: string; value: string }> = [
+		{ label: 'PREV CLOSE', value: `$${fmtPrice(first)}` },
+		{ label: 'OPEN', value: `$${fmtPrice(pts[0].open ?? first)}` },
 		{ label: 'HIGH', value: `$${fmtPrice(hi)}` },
 		{ label: 'LOW', value: `$${fmtPrice(lo)}` },
-		{ label: 'START', value: `$${fmtPrice(first)}` },
 	];
 	const statsRight = W - 28;
 	const statsLeft = statsRight - 150;
@@ -432,13 +579,26 @@ export function renderHistoryChart(data: HistoryData, type: AssetType, displayNa
 	ctx.fillStyle = COLORS.panel;
 	ctx.fillRect(chartX, chartY, chartW, chartH);
 
+	// Candle bodies (real OHLC from the history bars; the appended live tick is
+	// close-only → renders as a doji). Y-range must include wick extremes.
+	const candles: Candle[] = pts.map(p => ({
+		t: p.t, open: p.open ?? p.price, high: p.high ?? p.price, low: p.low ?? p.price, close: p.price, volume: p.volume,
+	}));
+	let dataLo = lo, dataHi = hi;
+	if (effMode === 'candle') {
+		for (const c of candles) {
+			dataLo = Math.min(dataLo, c.low);
+			dataHi = Math.max(dataHi, c.high);
+		}
+	}
+
 	const tMin = pts[0].t;
 	const tMax = pts[pts.length - 1].t;
 	const span = Math.max(1, tMax - tMin);
 	const xScale = (t: number) => chartX + ((t - tMin) / span) * chartW;
-	const pad = (hi - lo) * 0.08 || hi * 0.02 || 1;
-	const yMin = Math.min(lo, first) - pad;
-	const yMax = Math.max(hi, first) + pad;
+	const pad = (dataHi - dataLo) * 0.08 || dataHi * 0.02 || 1;
+	const yMin = Math.min(dataLo, first) - pad;
+	const yMax = Math.max(dataHi, first) + pad;
 	const ySpan = Math.max(0.0001, yMax - yMin);
 	const yScale = (v: number) => chartY + chartH - ((v - yMin) / ySpan) * chartH;
 
@@ -453,6 +613,9 @@ export function renderHistoryChart(data: HistoryData, type: AssetType, displayNa
 		ctx.stroke();
 	}
 
+	// Volume histogram behind the price (candle mode only)
+	if (effMode === 'candle') drawVolumeOverlay(ctx, candles, xScale, chartX, chartY, chartW, chartH, palette.line, downColor);
+
 	// Window-start baseline
 	ctx.strokeStyle = COLORS.prevLine;
 	ctx.setLineDash([4, 4]);
@@ -463,46 +626,37 @@ export function renderHistoryChart(data: HistoryData, type: AssetType, displayNa
 	ctx.stroke();
 	ctx.setLineDash([]);
 
-	// Fill + line
-	ctx.beginPath();
-	ctx.moveTo(xScale(pts[0].t), chartY + chartH);
-	for (const p of pts) ctx.lineTo(xScale(p.t), yScale(p.price));
-	ctx.lineTo(xScale(pts[pts.length - 1].t), chartY + chartH);
-	ctx.closePath();
-	ctx.fillStyle = palette.fill;
-	ctx.fill();
-
-	ctx.strokeStyle = palette.line;
-	ctx.lineWidth = 2;
-	ctx.beginPath();
-	pts.forEach((p, i) => {
-		const x = xScale(p.t);
-		const y = yScale(p.price);
-		if (i === 0) ctx.moveTo(x, y);
-		else ctx.lineTo(x, y);
-	});
-	ctx.stroke();
-
-	// End dot
-	ctx.fillStyle = palette.line;
-	ctx.beginPath();
-	ctx.arc(xScale(pts[pts.length - 1].t), yScale(last), 4, 0, Math.PI * 2);
-	ctx.fill();
-
-	// Y-axis price labels — drawn last with a backing so they stay legible where
-	// the price line crosses them.
-	ctx.font = '11px Inter';
-	ctx.textAlign = 'right';
-	for (let g = 0; g <= 4; g++) {
-		const y = chartY + (chartH / 4) * g;
-		const yLabel = `$${fmtPrice(yMax - (ySpan / 4) * g)}`;
-		const lw = ctx.measureText(yLabel).width;
-		ctx.fillStyle = COLORS.panel;
-		ctx.fillRect(chartX + chartW - lw - 8, y - 13, lw + 8, 14);
-		ctx.fillStyle = COLORS.dim;
-		ctx.fillText(yLabel, chartX + chartW - 4, y - 3);
+	if (effMode === 'candle') {
+		drawCandles(ctx, candles, xScale, yScale, palette.line, downColor, chartW);
 	}
-	ctx.textAlign = 'left';
+	else {
+		ctx.beginPath();
+		ctx.moveTo(xScale(pts[0].t), chartY + chartH);
+		for (const p of pts) ctx.lineTo(xScale(p.t), yScale(p.price));
+		ctx.lineTo(xScale(pts[pts.length - 1].t), chartY + chartH);
+		ctx.closePath();
+		ctx.fillStyle = palette.fill;
+		ctx.fill();
+
+		ctx.strokeStyle = palette.line;
+		ctx.lineWidth = 2;
+		ctx.beginPath();
+		pts.forEach((p, i) => {
+			const x = xScale(p.t);
+			const y = yScale(p.price);
+			if (i === 0) ctx.moveTo(x, y);
+			else ctx.lineTo(x, y);
+		});
+		ctx.stroke();
+
+		ctx.fillStyle = palette.line;
+		ctx.beginPath();
+		ctx.arc(xScale(pts[pts.length - 1].t), yScale(last), 4, 0, Math.PI * 2);
+		ctx.fill();
+	}
+
+	// Y-axis price labels inside the plot at the right edge
+	drawYLabels(ctx, chartX, chartY, chartW, chartH, yMax, ySpan);
 
 	// X-axis date labels
 	const labelCount = 5;
@@ -516,6 +670,8 @@ export function renderHistoryChart(data: HistoryData, type: AssetType, displayNa
 		const lx = Math.max(chartX, Math.min(chartX + chartW - w, xScale(t) - w / 2));
 		ctx.fillText(label, lx, chartY + chartH + 18);
 	}
+
+	drawFundamentalsStrip(ctx, data, 28, 122);
 
 	return canvas.toBuffer('image/png');
 }

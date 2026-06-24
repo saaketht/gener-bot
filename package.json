@@ -12,7 +12,8 @@
     "start": "ts-node src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "seed-profiles": "ts-node src/scripts/seedProfiles.ts"
+    "seed-profiles": "ts-node src/scripts/seedProfiles.ts",
+    "preview-charts": "ts-node src/scripts/previewCharts.ts"
   },
   "keywords": [
     "discord",

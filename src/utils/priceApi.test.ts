@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { normalizeSymbol, toAssetType, getPrice, getAssetPrice, getHistory, clearPriceCache, clearHistoryCache } from './priceApi';
+import { normalizeSymbol, toAssetType, getPrice, getAssetPrice, getHistory, getFundamentals, clearPriceCache, clearHistoryCache, clearFundamentalsCache } from './priceApi';
 
 // --- normalizeSymbol ---
 
@@ -101,14 +101,21 @@ const finnhubMetricResponse = {
 		// marketCapitalization is in millions USD: 542000 → $542B
 		marketCapitalization: 542000,
 		peBasicExclExtraTTM: 28.5,
+		currentDividendYieldTTM: 0.55,
 	},
 };
 
-function makeFetch(finnhub: object | null, yahoo: object | null, finnhubMetric: object | null = finnhubMetricResponse) {
+const earningsResponse = { earningsCalendar: [{ date: '2026-07-29' }] };
+
+function makeFetch(finnhub: object | null, yahoo: object | null, finnhubMetric: object | null = finnhubMetricResponse, earnings: object | null = earningsResponse) {
 	return vi.fn().mockImplementation((url: string) => {
 		if (url.includes('finnhub.io/api/v1/stock/metric')) {
 			if (!finnhubMetric) return Promise.resolve({ ok: false, status: 500 });
 			return Promise.resolve({ ok: true, json: () => Promise.resolve(finnhubMetric) });
+		}
+		if (url.includes('finnhub.io/api/v1/calendar/earnings')) {
+			if (!earnings) return Promise.resolve({ ok: false, status: 403 });
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(earnings) });
 		}
 		if (url.includes('finnhub.io')) {
 			if (!finnhub) return Promise.resolve({ ok: false, status: 500 });
@@ -127,6 +134,7 @@ beforeEach(() => {
 	vi.useFakeTimers();
 	vi.setSystemTime(new Date(REGULAR_NOW * 1000));
 	clearPriceCache();
+	clearFundamentalsCache();
 	process.env.FINNHUB_API_KEY = 'test-key';
 });
 
@@ -150,6 +158,8 @@ describe('getPrice', () => {
 		expect(result!.volume).toBe(42_500_000);
 		expect(result!.market_cap).toBe(542_000 * 1e6);
 		expect(result!.pe_ratio).toBe(28.5);
+		expect(result!.dividend_yield).toBe(0.55);
+		expect(result!.next_earnings).toBe(Math.floor(Date.parse('2026-07-29T00:00:00Z') / 1000));
 	});
 
 	it('derives open from first regular-session bar when meta.regularMarketOpen is missing', async () => {
@@ -247,6 +257,19 @@ describe('getPrice', () => {
 		expect(result!.intraday!.regular_end).toBe(REG_END);
 	});
 
+	it('attaches the intraday volume series when present and length-matched', async () => {
+		const withVol = {
+			chart: { result: [{
+				meta: yahooMeta,
+				timestamp: [REG_START, REG_START + 300, REG_START + 600],
+				indicators: { quote: [{ close: [592.0, 592.5, 593.25], volume: [1000, 2000, 3000] }] },
+			}] },
+		};
+		vi.stubGlobal('fetch', makeFetch(null, withVol));
+		const result = await getPrice('SPY');
+		expect(result!.intraday!.volumes).toEqual([1000, 2000, 3000]);
+	});
+
 	it('derives post-market headline from the post-session intraday bars', async () => {
 		vi.setSystemTime(new Date((REG_END + 600) * 1000));
 		const postResponse = {
@@ -335,8 +358,14 @@ describe('getAssetPrice', () => {
 function historyResponse(opts: {
 	timestamps: number[];
 	closes: (number | null)[];
+	opens?: (number | null)[];
+	highs?: (number | null)[];
+	lows?: (number | null)[];
+	volumes?: (number | null)[];
 	regularMarketPrice?: number;
 	regularMarketTime?: number;
+	fiftyTwoWeekHigh?: number;
+	fiftyTwoWeekLow?: number;
 	name?: string;
 }) {
 	return {
@@ -347,12 +376,24 @@ function historyResponse(opts: {
 					longName: opts.name,
 					regularMarketPrice: opts.regularMarketPrice,
 					regularMarketTime: opts.regularMarketTime,
+					fiftyTwoWeekHigh: opts.fiftyTwoWeekHigh,
+					fiftyTwoWeekLow: opts.fiftyTwoWeekLow,
 				},
 				timestamp: opts.timestamps,
-				indicators: { quote: [{ close: opts.closes }] },
+				indicators: { quote: [{
+					close: opts.closes,
+					open: opts.opens,
+					high: opts.highs,
+					low: opts.lows,
+					volume: opts.volumes,
+				}] },
 			}] },
 		}),
 	};
+}
+
+function chartCalls(mock: ReturnType<typeof vi.fn>): number {
+	return mock.mock.calls.filter((c: unknown[]) => String(c[0]).includes('v8/finance/chart')).length;
 }
 
 describe('getHistory', () => {
@@ -428,7 +469,8 @@ describe('getHistory', () => {
 		vi.stubGlobal('fetch', fetchMock);
 		await getHistory('NVDA', '1y', 'stock');
 		await getHistory('NVDA', '1y', 'stock');
-		expect(fetchMock.mock.calls.length).toBe(1);
+		// Count only the Yahoo history fetch — fundamentals are a separate cached call.
+		expect(chartCalls(fetchMock)).toBe(1);
 	});
 
 	it('force=true bypasses the history cache', async () => {
@@ -436,6 +478,93 @@ describe('getHistory', () => {
 		vi.stubGlobal('fetch', fetchMock);
 		await getHistory('AMD', '1y', 'stock');
 		await getHistory('AMD', '1y', 'stock', true);
-		expect(fetchMock.mock.calls.length).toBe(2);
+		expect(chartCalls(fetchMock)).toBe(2);
+	});
+
+	it('attaches OHLCV onto points when the arrays are present', async () => {
+		vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(historyResponse({
+			timestamps: [100, 200],
+			closes: [10, 11],
+			opens: [9, 10.5],
+			highs: [10.2, 11.4],
+			lows: [8.8, 10.1],
+			volumes: [1000, 2000],
+		}))));
+		const h = await getHistory('AAPL', '1y', 'stock');
+		expect(h!.points[0]).toEqual({ t: 100, price: 10, open: 9, high: 10.2, low: 8.8, volume: 1000 });
+		expect(h!.points[1]).toEqual({ t: 200, price: 11, open: 10.5, high: 11.4, low: 10.1, volume: 2000 });
+	});
+
+	it('attaches OHLCV fields independently when some are null', async () => {
+		vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(historyResponse({
+			timestamps: [100, 200],
+			closes: [10, 11],
+			opens: [null, 10.5],
+			volumes: [null, 2000],
+		}))));
+		const h = await getHistory('MSFT', '1y', 'stock');
+		expect(h!.points[0]).toEqual({ t: 100, price: 10 });
+		expect(h!.points[1]).toEqual({ t: 200, price: 11, open: 10.5, volume: 2000 });
+	});
+
+	it('captures the 52-week range onto HistoryData', async () => {
+		vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(historyResponse({
+			timestamps: [1, 2],
+			closes: [1, 2],
+			fiftyTwoWeekHigh: 260.1,
+			fiftyTwoWeekLow: 168.2,
+		}))));
+		const h = await getHistory('GOOG', '1y', 'stock');
+		expect(h!.week52_high).toBe(260.1);
+		expect(h!.week52_low).toBe(168.2);
+	});
+
+	it('populates fundamentals onto the history view (stock)', async () => {
+		vi.stubGlobal('fetch', vi.fn((url: string) => {
+			if (url.includes('stock/metric')) return Promise.resolve({ ok: true, json: () => Promise.resolve(finnhubMetricResponse) });
+			if (url.includes('calendar/earnings')) return Promise.resolve({ ok: true, json: () => Promise.resolve(earningsResponse) });
+			return Promise.resolve(historyResponse({ timestamps: [1, 2], closes: [10, 11] }));
+		}));
+		const h = await getHistory('AAPL', '1y', 'stock');
+		expect(h!.market_cap).toBe(542_000 * 1e6);
+		expect(h!.pe_ratio).toBe(28.5);
+		expect(h!.dividend_yield).toBe(0.55);
+		expect(h!.next_earnings).toBe(Math.floor(Date.parse('2026-07-29T00:00:00Z') / 1000));
+	});
+
+	it('does not attach fundamentals for crypto/commodity history', async () => {
+		const fetchMock = vi.fn(() => Promise.resolve(historyResponse({ timestamps: [1, 2], closes: [1, 2] })));
+		vi.stubGlobal('fetch', fetchMock);
+		const h = await getHistory('BTC', '1y', 'crypto');
+		expect(h!.market_cap).toBeUndefined();
+		expect(h!.next_earnings).toBeUndefined();
+		// getFundamentals short-circuits for non-stock → only the chart was fetched
+		expect(fetchMock.mock.calls.every((c: unknown[]) => (c[0] as string).includes('v8/finance/chart'))).toBe(true);
+	});
+});
+
+describe('getFundamentals', () => {
+	it('merges metrics (incl. dividend yield) and next earnings for a stock', async () => {
+		vi.stubGlobal('fetch', makeFetch(finnhubResponse, yahooResponse));
+		const f = await getFundamentals('SPY');
+		expect(f.market_cap).toBe(542_000 * 1e6);
+		expect(f.pe_ratio).toBe(28.5);
+		expect(f.dividend_yield).toBe(0.55);
+		expect(f.next_earnings).toBe(Math.floor(Date.parse('2026-07-29T00:00:00Z') / 1000));
+	});
+
+	it('returns empty (no fetch) for crypto/commodity symbols', async () => {
+		const fetchMock = makeFetch(finnhubResponse, yahooResponse);
+		vi.stubGlobal('fetch', fetchMock);
+		expect(await getFundamentals('BTC-USD')).toEqual({});
+		expect(await getFundamentals('CL=F')).toEqual({});
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('drops the earnings field defensively when the endpoint 403s', async () => {
+		vi.stubGlobal('fetch', makeFetch(finnhubResponse, yahooResponse, finnhubMetricResponse, null));
+		const f = await getFundamentals('SPY');
+		expect(f.market_cap).toBe(542_000 * 1e6);
+		expect(f.next_earnings).toBeUndefined();
 	});
 });

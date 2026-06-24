@@ -5,6 +5,7 @@ export type Session = 'pre' | 'regular' | 'post' | 'closed';
 export interface IntradaySeries {
 	timestamps: number[];
 	closes: (number | null)[];
+	volumes?: (number | null)[];
 	regular_start: number;
 	regular_end: number;
 }
@@ -29,12 +30,18 @@ export interface PriceData {
 	intraday?: IntradaySeries;
 	market_cap?: number;
 	pe_ratio?: number;
+	dividend_yield?: number;
+	next_earnings?: number;
 	source: string;
 }
 
 export interface HistoryPoint {
 	t: number;
 	price: number;
+	open?: number;
+	high?: number;
+	low?: number;
+	volume?: number;
 }
 
 export interface HistoryData {
@@ -43,6 +50,12 @@ export interface HistoryData {
 	name?: string;
 	range: string;
 	points: HistoryPoint[];
+	week52_high?: number;
+	week52_low?: number;
+	market_cap?: number;
+	pe_ratio?: number;
+	dividend_yield?: number;
+	next_earnings?: number;
 	source: string;
 }
 
@@ -122,6 +135,7 @@ async function fetchYahoo(symbol: string): Promise<PriceData | null> {
 
 		const timestamps: number[] | undefined = result?.timestamp;
 		const closes: (number | null)[] | undefined = result?.indicators?.quote?.[0]?.close;
+		const volumes: (number | null)[] | undefined = result?.indicators?.quote?.[0]?.volume;
 		const tp = meta?.currentTradingPeriod;
 		const reg = tp?.regular;
 
@@ -175,6 +189,7 @@ async function fetchYahoo(symbol: string): Promise<PriceData | null> {
 				regular_start: reg.start,
 				regular_end: reg.end,
 			};
+			if (volumes && volumes.length === timestamps.length) out.intraday.volumes = volumes;
 		}
 		else {
 			logger.warn(`Yahoo chart ${symbol} returned no intraday series (timestamps=${!!timestamps}, closes=${!!closes}, currentTradingPeriod=${!!reg}) — falling back to text-only embed`);
@@ -203,6 +218,8 @@ async function fetchYahoo(symbol: string): Promise<PriceData | null> {
 interface Fundamentals {
 	market_cap?: number;
 	pe_ratio?: number;
+	dividend_yield?: number;
+	next_earnings?: number;
 }
 
 async function fetchFinnhubMetrics(symbol: string): Promise<Fundamentals | null> {
@@ -224,12 +241,62 @@ async function fetchFinnhubMetrics(symbol: string): Promise<Fundamentals | null>
 		}
 		const pe = m.peBasicExclExtraTTM ?? m.peTTM ?? m.peNormalizedAnnual;
 		if (typeof pe === 'number' && isFinite(pe)) out.pe_ratio = pe;
+		const dy = m.currentDividendYieldTTM ?? m.dividendYieldIndicatedAnnual;
+		if (typeof dy === 'number' && isFinite(dy) && dy >= 0) out.dividend_yield = dy;
 		return out;
 	}
 	catch (e) {
 		logger.warn(`Finnhub metric fetch failed for ${symbol}:`, e);
 		return null;
 	}
+}
+
+// Next scheduled earnings date (epoch seconds). Defensive: returns undefined on a
+// non-ok response / empty calendar so a premium-gated or earnings-less symbol
+// (ETF, crypto) just drops the field rather than failing the whole fetch.
+async function fetchFinnhubEarnings(symbol: string): Promise<number | undefined> {
+	const key = process.env.FINNHUB_API_KEY;
+	if (!key) return undefined;
+	try {
+		const today = new Date().toISOString().slice(0, 10);
+		const to = new Date(Date.now() + 120 * 86_400_000).toISOString().slice(0, 10);
+		const res = await fetch(
+			`https://finnhub.io/api/v1/calendar/earnings?symbol=${encodeURIComponent(symbol.toUpperCase())}&from=${today}&to=${to}&token=${key}`,
+		);
+		if (!res.ok) return undefined;
+		const data = await res.json();
+		const date: string | undefined = data?.earningsCalendar?.[0]?.date;
+		if (!date) return undefined;
+		const epoch = Math.floor(Date.parse(`${date}T00:00:00Z`) / 1000);
+		return isFinite(epoch) ? epoch : undefined;
+	}
+	catch (e) {
+		logger.warn(`Finnhub earnings fetch failed for ${symbol}:`, e);
+		return undefined;
+	}
+}
+
+// Per-symbol fundamentals (metrics + next earnings), cached longer than prices
+// since they barely move. Gated by looksLikeStock — crypto/commodities have none.
+interface FundCacheEntry { data: Fundamentals; ts: number }
+const fundamentalsCache = new Map<string, FundCacheEntry>();
+const FUNDAMENTALS_TTL_MS = 30 * 60_000;
+
+export async function getFundamentals(symbol: string): Promise<Fundamentals> {
+	const key = symbol.toUpperCase();
+	if (!looksLikeStock(key)) return {};
+	const hit = fundamentalsCache.get(key);
+	if (hit && Date.now() - hit.ts < FUNDAMENTALS_TTL_MS) return hit.data;
+
+	const [metrics, earnings] = await Promise.all([fetchFinnhubMetrics(key), fetchFinnhubEarnings(key)]);
+	const out: Fundamentals = { ...(metrics ?? {}) };
+	if (earnings) out.next_earnings = earnings;
+	fundamentalsCache.set(key, { data: out, ts: Date.now() });
+	return out;
+}
+
+export function clearFundamentalsCache() {
+	fundamentalsCache.clear();
 }
 
 function looksLikeStock(symbol: string): boolean {
@@ -278,12 +345,14 @@ export async function getPrice(symbol: string, force = false): Promise<PriceData
 
 	const [yahoo, fundamentals] = await Promise.all([
 		fetchYahoo(symbol),
-		looksLikeStock(symbol) ? fetchFinnhubMetrics(symbol) : Promise.resolve(null),
+		getFundamentals(symbol),
 	]);
 	const result = yahoo ?? await fetchFinnhub(symbol);
 	if (!result) return null;
-	if (fundamentals?.market_cap) result.market_cap = fundamentals.market_cap;
-	if (fundamentals?.pe_ratio) result.pe_ratio = fundamentals.pe_ratio;
+	if (fundamentals.market_cap) result.market_cap = fundamentals.market_cap;
+	if (fundamentals.pe_ratio) result.pe_ratio = fundamentals.pe_ratio;
+	if (fundamentals.dividend_yield != null) result.dividend_yield = fundamentals.dividend_yield;
+	if (fundamentals.next_earnings) result.next_earnings = fundamentals.next_earnings;
 	writeCache(key, result);
 	return result;
 }
@@ -363,17 +432,29 @@ async function fetchYahooHistory(symbol: string, yRange: string, interval: strin
 		const result = data?.chart?.result?.[0];
 		const meta = result?.meta;
 		const timestamps: number[] | undefined = result?.timestamp;
-		const closes: (number | null)[] | undefined = result?.indicators?.quote?.[0]?.close;
+		const quote = result?.indicators?.quote?.[0];
+		const closes: (number | null)[] | undefined = quote?.close;
 		if (!timestamps || !closes || timestamps.length !== closes.length) {
 			logger.warn(`Yahoo history ${symbol} (${yRange}) missing series`);
 			return null;
 		}
+		const opens: (number | null)[] | undefined = quote?.open;
+		const highs: (number | null)[] | undefined = quote?.high;
+		const lows: (number | null)[] | undefined = quote?.low;
+		const volumes: (number | null)[] | undefined = quote?.volume;
 
 		const points: HistoryPoint[] = [];
 		for (let i = 0; i < timestamps.length; i++) {
 			const c = closes[i];
 			if (c == null) continue;
-			points.push({ t: timestamps[i], price: c });
+			// Gate on close; a bar can have a present close but a null open/high on thin
+			// trading, so attach each OHLCV field independently when available.
+			const pt: HistoryPoint = { t: timestamps[i], price: c };
+			if (opens?.[i] != null) pt.open = opens[i] as number;
+			if (highs?.[i] != null) pt.high = highs[i] as number;
+			if (lows?.[i] != null) pt.low = lows[i] as number;
+			if (volumes?.[i] != null) pt.volume = volumes[i] as number;
+			points.push(pt);
 		}
 		if (points.length < 2) return null;
 
@@ -395,6 +476,8 @@ async function fetchYahooHistory(symbol: string, yRange: string, interval: strin
 		};
 		const name = meta?.longName ?? meta?.shortName;
 		if (name) out.name = name;
+		if (meta?.fiftyTwoWeekHigh > 0) out.week52_high = meta.fiftyTwoWeekHigh;
+		if (meta?.fiftyTwoWeekLow > 0) out.week52_low = meta.fiftyTwoWeekLow;
 		return out;
 	}
 	catch (e) {
@@ -421,9 +504,20 @@ export async function getHistory(symbol: string, range: string, type: AssetType,
 	const hit = force ? undefined : historyCache.get(cacheKey);
 	if (hit && Date.now() - hit.ts < HISTORY_TTL_MS) return hit.data;
 
-	const fetched = await fetchYahooHistory(normalized, conf.range, conf.interval);
+	// Fundamentals in parallel so the history view carries the same strip as the
+	// live view (getFundamentals no-ops for crypto/commodity and is cached).
+	const [fetched, fundamentals] = await Promise.all([
+		fetchYahooHistory(normalized, conf.range, conf.interval),
+		getFundamentals(normalized),
+	]);
 	if (!fetched) return null;
-	const out: HistoryData = { ...fetched, symbol: symbol.toUpperCase(), query_symbol: normalized, range };
+	const out: HistoryData = {
+		...fetched, symbol: symbol.toUpperCase(), query_symbol: normalized, range,
+		market_cap: fundamentals.market_cap,
+		pe_ratio: fundamentals.pe_ratio,
+		dividend_yield: fundamentals.dividend_yield,
+		next_earnings: fundamentals.next_earnings,
+	};
 
 	if (historyCache.size >= HISTORY_MAX) {
 		const oldest = historyCache.keys().next().value;

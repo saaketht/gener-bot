@@ -1,6 +1,6 @@
 import { EmbedBuilder, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { PriceData, AssetType, HistoryData, RANGE_LABELS, toAssetType, getAssetPrice, getHistory } from '../utils/priceApi';
-import { renderAssetChart, renderHistoryChart } from './asset-chart';
+import { renderAssetChart, renderHistoryChart, candleAllowed, ChartMode } from './asset-chart';
 
 function fmt(val: number, decimals = 2): string {
 	return val.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
@@ -24,7 +24,7 @@ export interface AssetEmbedResult {
 
 let chartCounter = 0;
 
-export function getAssetEmbed(price: PriceData, type: AssetType, displayName?: string): AssetEmbedResult {
+export function getAssetEmbed(price: PriceData, type: AssetType, displayName?: string, mode: ChartMode = 'line'): AssetEmbedResult {
 	// During an active extended session the headline price moves against the last
 	// regular close, not prev close — keep the dollar change and label in step with
 	// change_pct (which priceApi computes the same way).
@@ -52,7 +52,7 @@ export function getAssetEmbed(price: PriceData, type: AssetType, displayName?: s
 		);
 
 	const files: AttachmentBuilder[] = [];
-	const chart = renderAssetChart(price, type, name);
+	const chart = renderAssetChart(price, type, name, mode);
 	if (chart) {
 		const filename = `chart-${++chartCounter}.png`;
 		files.push(new AttachmentBuilder(chart, { name: filename }));
@@ -93,7 +93,7 @@ export function getAssetEmbed(price: PriceData, type: AssetType, displayName?: s
 	return { embed, files };
 }
 
-export function getHistoryEmbed(data: HistoryData, type: AssetType, displayName?: string): AssetEmbedResult {
+export function getHistoryEmbed(data: HistoryData, type: AssetType, displayName?: string, mode: ChartMode = 'line'): AssetEmbedResult {
 	const first = data.points[0].price;
 	const last = data.points[data.points.length - 1].price;
 	const change = last - first;
@@ -118,7 +118,7 @@ export function getHistoryEmbed(data: HistoryData, type: AssetType, displayName?
 		);
 
 	const files: AttachmentBuilder[] = [];
-	const chart = renderHistoryChart(data, type, name);
+	const chart = renderHistoryChart(data, type, name, mode);
 	if (chart) {
 		const filename = `chart-${++chartCounter}.png`;
 		files.push(new AttachmentBuilder(chart, { name: filename }));
@@ -143,24 +143,36 @@ export async function resolveAssetView(
 	type: AssetType,
 	range: string,
 	force = false,
+	mode: ChartMode = 'line',
 ): Promise<AssetEmbedResult | null> {
 	if (range === '1d') {
 		const price = await getAssetPrice(symbol, type, force);
-		return price ? getAssetEmbed(price, type) : null;
+		return price ? getAssetEmbed(price, type, undefined, mode) : null;
 	}
 	const hist = await getHistory(symbol, range, type, force);
-	return hist ? getHistoryEmbed(hist, type) : null;
+	return hist ? getHistoryEmbed(hist, type, undefined, mode) : null;
 }
 
-// Decode a timeframe / refresh button customId back into its parts. range and
-// type never contain underscores, so two leading splits isolate the symbol
-// intact even if the symbol itself does (e.g. NATURAL_GAS).
-export function parseTimeframeCustomId(customId: string): { range: string; type: AssetType; symbol: string } | null {
+// Decode a timeframe / refresh / mode-toggle customId into its parts. An optional
+// leading mode segment (line|candle) is sniffed off first — legacy 4-segment
+// buttons on old messages omit it and default to line. range and type never
+// contain underscores, so the symbol (which may, e.g. NATURAL_GAS) stays intact.
+export function parseTimeframeCustomId(customId: string): { mode: ChartMode; range: string; type: AssetType; symbol: string } | null {
 	const prefix = customId.startsWith('asset_tf_') ? 'asset_tf_'
 		: customId.startsWith('asset_refresh_') ? 'asset_refresh_'
-			: null;
+			: customId.startsWith('asset_mode_') ? 'asset_mode_'
+				: null;
 	if (!prefix) return null;
-	const rest = customId.slice(prefix.length);
+	let rest = customId.slice(prefix.length);
+
+	let mode: ChartMode = 'line';
+	const i0 = rest.indexOf('_');
+	const seg0 = i0 >= 0 ? rest.slice(0, i0) : '';
+	if (seg0 === 'line' || seg0 === 'candle') {
+		mode = seg0;
+		rest = rest.slice(i0 + 1);
+	}
+
 	const i1 = rest.indexOf('_');
 	if (i1 < 0) return null;
 	const range = rest.slice(0, i1);
@@ -169,18 +181,22 @@ export function parseTimeframeCustomId(customId: string): { range: string; type:
 	if (i2 < 0) return null;
 	const symbol = rest2.slice(i2 + 1);
 	if (!range || !symbol) return null;
-	return { range, type: toAssetType(rest2.slice(0, i2)), symbol };
+	return { mode, range, type: toAssetType(rest2.slice(0, i2)), symbol };
 }
 
-export function buildTimeframeRows(displaySymbol: string, type: AssetType, active: string): ActionRowBuilder<ButtonBuilder>[] {
+// 8 timeframes + refresh + candle-toggle = 10 buttons across two rows of five
+// (Discord's per-row max). customIds carry the active chart mode so it sticks as
+// the user switches timeframes; the symbol is the friendly display form so the
+// handler re-normalizes per type and the ticker stays stable.
+export function buildTimeframeRows(displaySymbol: string, type: AssetType, active: string, mode: ChartMode = 'line'): ActionRowBuilder<ButtonBuilder>[] {
 	const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-	for (let i = 0; i < TIMEFRAME_ORDER.length; i += 4) {
+	for (let i = 0; i < TIMEFRAME_ORDER.length; i += 5) {
 		const row = new ActionRowBuilder<ButtonBuilder>();
-		for (const range of TIMEFRAME_ORDER.slice(i, i + 4)) {
+		for (const range of TIMEFRAME_ORDER.slice(i, i + 5)) {
 			const isActive = range === active;
 			row.addComponents(
 				new ButtonBuilder()
-					.setCustomId(`asset_tf_${range}_${type}_${displaySymbol}`)
+					.setCustomId(`asset_tf_${mode}_${range}_${type}_${displaySymbol}`)
 					.setLabel(RANGE_LABELS[range])
 					.setStyle(isActive ? ButtonStyle.Primary : ButtonStyle.Secondary)
 					.setDisabled(isActive),
@@ -188,14 +204,23 @@ export function buildTimeframeRows(displaySymbol: string, type: AssetType, activ
 		}
 		rows.push(row);
 	}
+	const lastRow = rows[rows.length - 1];
 	// Refresh re-fetches the active timeframe with fresh data (cache bypassed).
-	// Encodes the active range so the handler knows what to re-pull. Rides on the
-	// last row's spare slot (4 timeframes + refresh = 5, Discord's row max).
-	rows[rows.length - 1].addComponents(
+	lastRow.addComponents(
 		new ButtonBuilder()
-			.setCustomId(`asset_refresh_${active}_${type}_${displaySymbol}`)
+			.setCustomId(`asset_refresh_${mode}_${active}_${type}_${displaySymbol}`)
 			.setEmoji('🔄')
 			.setStyle(ButtonStyle.Secondary),
+	);
+	// Candle/line toggle — flips to the opposite mode. Disabled on ranges too dense
+	// for candles (1y/5y/all), which always render as a line.
+	const target: ChartMode = mode === 'candle' ? 'line' : 'candle';
+	lastRow.addComponents(
+		new ButtonBuilder()
+			.setCustomId(`asset_mode_${target}_${active}_${type}_${displaySymbol}`)
+			.setLabel(mode === 'candle' ? 'Line' : 'Candles')
+			.setStyle(ButtonStyle.Secondary)
+			.setDisabled(!candleAllowed(active)),
 	);
 	return rows;
 }

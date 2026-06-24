@@ -50,7 +50,7 @@ const interactionCreateEvent = {
 				return;
 			}
 
-			if (interaction.customId.startsWith('asset_tf_') || interaction.customId.startsWith('asset_refresh_')) {
+			if (interaction.customId.startsWith('asset_tf_') || interaction.customId.startsWith('asset_refresh_') || interaction.customId.startsWith('asset_mode_')) {
 				if (!rateLimiter(interaction.user.id, 'asset_tf', 8, 15000)) {
 					await interaction.reply({ content: 'Slow down — try again in a few seconds.', flags: MessageFlags.Ephemeral });
 					return;
@@ -58,13 +58,13 @@ const interactionCreateEvent = {
 
 				const parsed = parseTimeframeCustomId(interaction.customId);
 				if (!parsed) return;
-				const { range, type, symbol } = parsed;
+				const { mode, range, type, symbol } = parsed;
 				// Refresh bypasses the price/history cache for a genuinely live pull.
 				const force = interaction.customId.startsWith('asset_refresh_');
 
 				try {
 					await interaction.deferUpdate();
-					const result = await resolveAssetView(symbol, type, range, force);
+					const result = await resolveAssetView(symbol, type, range, force, mode);
 					if (!result) {
 						logger.warn(`asset timeframe fetch returned null (${symbol} ${range})`);
 						await interaction.followUp({
@@ -76,7 +76,7 @@ const interactionCreateEvent = {
 					await interaction.editReply({
 						embeds: [result.embed],
 						files: result.files,
-						components: buildTimeframeRows(symbol, type, range),
+						components: buildTimeframeRows(symbol, type, range, mode),
 					});
 				}
 				catch (error) {

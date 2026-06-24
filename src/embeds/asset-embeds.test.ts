@@ -239,49 +239,68 @@ describe('getHistoryEmbed', () => {
 });
 
 describe('timeframe buttons', () => {
-	it('builds 8 timeframe buttons + 1 refresh across 2 rows', () => {
+	it('builds 8 timeframe buttons + refresh + toggle across 2 rows of 5', () => {
 		const rows = buildTimeframeRows('AAPL', 'stock', '1d');
 		expect(rows.length).toBe(2);
 		const buttons = rows.flatMap(r => r.toJSON().components);
-		expect(buttons.length).toBe(9);
-		// Last row carries the spare refresh slot (4 timeframes + refresh)
+		expect(buttons.length).toBe(10);
+		expect(rows[0].toJSON().components.length).toBe(5);
 		expect(rows[1].toJSON().components.length).toBe(5);
 	});
 
-	it('disables and highlights the active timeframe only (refresh stays enabled)', () => {
+	it('disables and highlights the active timeframe only', () => {
 		const buttons = buildTimeframeRows('AAPL', 'stock', '1y').flatMap(r => r.toJSON().components) as any[];
-		const active = buttons.filter(b => b.disabled);
+		const tf = buttons.filter(b => b.custom_id?.startsWith('asset_tf_'));
+		const active = tf.filter(b => b.disabled);
 		expect(active.length).toBe(1);
-		expect(active[0].custom_id).toBe('asset_tf_1y_stock_AAPL');
+		expect(active[0].custom_id).toBe('asset_tf_line_1y_stock_AAPL');
 		// style 1 === ButtonStyle.Primary
 		expect(active[0].style).toBe(1);
 	});
 
-	it('emits a refresh button encoding the active range, never disabled', () => {
-		const buttons = buildTimeframeRows('AAPL', 'stock', '3m').flatMap(r => r.toJSON().components) as any[];
+	it('emits a refresh button encoding the active range + mode, never disabled', () => {
+		const buttons = buildTimeframeRows('AAPL', 'stock', '3m', 'candle').flatMap(r => r.toJSON().components) as any[];
 		const refresh = buttons.find(b => b.custom_id?.startsWith('asset_refresh_'));
-		expect(refresh.custom_id).toBe('asset_refresh_3m_stock_AAPL');
+		expect(refresh.custom_id).toBe('asset_refresh_candle_3m_stock_AAPL');
 		expect(refresh.disabled).toBeFalsy();
 	});
 
-	it('parses the refresh prefix back into parts', () => {
-		expect(parseTimeframeCustomId('asset_refresh_1y_crypto_BTC')).toEqual({
-			range: '1y', type: 'crypto', symbol: 'BTC',
-		});
+	it('emits a toggle that targets the opposite mode and is enabled on candle-capable ranges', () => {
+		const buttons = buildTimeframeRows('AAPL', 'stock', '3m', 'line').flatMap(r => r.toJSON().components) as any[];
+		const toggle = buttons.find(b => b.custom_id?.startsWith('asset_mode_'));
+		expect(toggle.custom_id).toBe('asset_mode_candle_3m_stock_AAPL');
+		expect(toggle.label).toBe('Candles');
+		expect(toggle.disabled).toBeFalsy();
 	});
 
-	it('round-trips encode → parse for every type', () => {
-		for (const [sym, type] of [['AAPL', 'stock'], ['BTC', 'crypto'], ['WTI', 'commodity']] as const) {
-			const id = buildTimeframeRows(sym, type, '1d').flatMap(r => r.toJSON().components)
-				.map((b: any) => b.custom_id).find((c: string) => c.includes('_3m_'))!;
-			const parsed = parseTimeframeCustomId(id);
-			expect(parsed).toEqual({ range: '3m', type, symbol: sym });
+	it('disables the toggle on ranges too dense for candles', () => {
+		for (const range of ['1y', '5y', 'all']) {
+			const toggle = (buildTimeframeRows('AAPL', 'stock', range).flatMap(r => r.toJSON().components) as any[])
+				.find(b => b.custom_id?.startsWith('asset_mode_'));
+			expect(toggle.disabled).toBe(true);
 		}
 	});
 
+	it('round-trips encode → parse for every type, preserving mode', () => {
+		for (const [sym, type] of [['AAPL', 'stock'], ['BTC', 'crypto'], ['WTI', 'commodity']] as const) {
+			const id = buildTimeframeRows(sym, type, '1d', 'candle').flatMap(r => r.toJSON().components)
+				.map((b: any) => b.custom_id).find((c: string) => c.startsWith('asset_tf_') && c.includes('_3m_'))!;
+			expect(parseTimeframeCustomId(id)).toEqual({ mode: 'candle', range: '3m', type, symbol: sym });
+		}
+	});
+
+	it('parses the refresh and mode-toggle prefixes', () => {
+		expect(parseTimeframeCustomId('asset_refresh_line_1y_crypto_BTC')).toEqual({ mode: 'line', range: '1y', type: 'crypto', symbol: 'BTC' });
+		expect(parseTimeframeCustomId('asset_mode_candle_3m_stock_AAPL')).toEqual({ mode: 'candle', range: '3m', type: 'stock', symbol: 'AAPL' });
+	});
+
+	it('defaults legacy 4-segment customIds (no mode) to line', () => {
+		expect(parseTimeframeCustomId('asset_tf_1y_crypto_BTC')).toEqual({ mode: 'line', range: '1y', type: 'crypto', symbol: 'BTC' });
+	});
+
 	it('parses a symbol that itself contains underscores', () => {
-		expect(parseTimeframeCustomId('asset_tf_5y_commodity_NATURAL_GAS')).toEqual({
-			range: '5y', type: 'commodity', symbol: 'NATURAL_GAS',
+		expect(parseTimeframeCustomId('asset_mode_candle_5y_commodity_NATURAL_GAS')).toEqual({
+			mode: 'candle', range: '5y', type: 'commodity', symbol: 'NATURAL_GAS',
 		});
 	});
 
@@ -292,7 +311,7 @@ describe('timeframe buttons', () => {
 	it('returns null for non-timeframe or malformed customIds', () => {
 		expect(parseTimeframeCustomId('flight_refresh_12')).toBeNull();
 		expect(parseTimeframeCustomId('asset_tf_1y')).toBeNull();
-		expect(parseTimeframeCustomId('asset_tf_1y_stock_')).toBeNull();
+		expect(parseTimeframeCustomId('asset_tf_line_1y_stock_')).toBeNull();
 	});
 });
 
