@@ -44,8 +44,8 @@ function fundamentals(type: AssetType, base: number) {
 	};
 }
 
-function buildIntraday(type: AssetType): PriceData {
-	reseed(1000 + type.length);
+function buildIntraday(type: AssetType, down = false): PriceData {
+	reseed(1000 + type.length + (down ? 1 : 0));
 	const base = BASE[type];
 	const regStart = END;
 	const regEnd = regStart + Math.round(6.5 * 3600);
@@ -57,12 +57,14 @@ function buildIntraday(type: AssetType): PriceData {
 	let p = base;
 	for (let t = preStart; t <= postEnd; t += 300) {
 		timestamps.push(t);
-		p = Math.max(base * 0.9, p + (rnd() - 0.48) * base * 0.004);
+		p = Math.max(base * 0.9, p + (rnd() - (down ? 0.52 : 0.48)) * base * 0.004);
 		closes.push(+p.toFixed(2));
 		volumes.push(Math.round(rnd() * 1e6));
 	}
 	const nums = closes.filter((c): c is number => c != null);
-	const prevClose = +(base * 0.992).toFixed(2);
+	// Down-day prev close sits above the series, putting the prev line near the
+	// panel top (the case where its label could collide with the strip above).
+	const prevClose = +(base * (down ? 1.03 : 0.992)).toFixed(2);
 	const price = nums[nums.length - 1];
 	const intraday: IntradaySeries = { timestamps, closes, volumes, regular_start: regStart, regular_end: regEnd };
 	return {
@@ -74,15 +76,29 @@ function buildIntraday(type: AssetType): PriceData {
 	};
 }
 
+// Realistic bar timestamps. 1w mimics real intraday data: 13 half-hour bars per
+// 6h session across 5 days with overnight GAPS (the case that exposed clumped/
+// overlapping candles). Other ranges are evenly stepped.
+function sessionTimestamps(range: string): number[] {
+	if (range === '1w') {
+		const ts: number[] = [];
+		for (let day = 4; day >= 0; day--) {
+			const open = END - day * 86400 - 12 * 1800;
+			for (let k = 0; k < 13; k++) ts.push(open + k * 1800);
+		}
+		return ts;
+	}
+	const n = RANGE_POINTS[range];
+	const step = RANGE_STEP[range];
+	return Array.from({ length: n }, (_, i) => END - (n - 1 - i) * step);
+}
+
 function buildHistory(range: string, type: AssetType): HistoryData {
 	reseed(2000 + range.length * 7 + type.length);
 	const base = BASE[type];
-	const n = RANGE_POINTS[range];
-	const step = RANGE_STEP[range];
 	const points: HistoryPoint[] = [];
 	let p = base * 0.75;
-	for (let i = 0; i < n; i++) {
-		const t = END - (n - 1 - i) * step;
+	for (const t of sessionTimestamps(range)) {
 		const o = p;
 		const c = Math.max(base * 0.5, o + (rnd() - 0.45) * base * 0.03);
 		const h = Math.max(o, c) + rnd() * base * 0.01;
@@ -91,6 +107,23 @@ function buildHistory(range: string, type: AssetType): HistoryData {
 		p = c;
 	}
 	return { symbol: SYMBOLS[type], name: NAMES[type], range, points, source: 'yahoo', ...fundamentals(type, base) };
+}
+
+// Compact raw-data summary so the rendered candles can be checked against the
+// underlying bars (count, the gap structure, and a few sample OHLCV rows).
+function dumpRaw(label: string, data: HistoryData): string {
+	const pts = data.points;
+	const gaps = pts.slice(1).map((p, i) => p.t - pts[i].t);
+	const minGap = Math.min(...gaps);
+	const maxGap = Math.max(...gaps);
+	const bar = (p: HistoryPoint) => `  t=${p.t} O=${p.open} H=${p.high} L=${p.low} C=${p.price} V=${p.volume}`;
+	return [
+		`### ${label} — ${pts.length} bars`,
+		`gap min/max (s): ${minGap} / ${maxGap}${maxGap > minGap * 3 ? '   ← NON-UNIFORM (gaps present)' : ''}`,
+		'first 3:', ...pts.slice(0, 3).map(bar),
+		'last 3:', ...pts.slice(-3).map(bar),
+		'',
+	].join('\n');
 }
 
 function write(name: string, buf: Buffer | null): void {
@@ -107,19 +140,28 @@ const MODES: Array<'line' | 'candle'> = ['line', 'candle'];
 function main(): void {
 	fs.mkdirSync(OUT, { recursive: true });
 	console.log(`rendering preview charts → ${OUT}`);
+	const raw: string[] = [];
 	for (const type of TYPES) {
 		const intraday = buildIntraday(type);
 		for (const mode of MODES) {
 			write(`preview-${type}-1d-${mode}.png`, renderAssetChart(intraday, type, undefined, mode));
+		}
+		if (type === 'stock') {
+			const intradayDown = buildIntraday(type, true);
+			for (const mode of MODES) {
+				write(`preview-${type}-1d-down-${mode}.png`, renderAssetChart(intradayDown, type, undefined, mode));
+			}
 		}
 		for (const range of RANGES) {
 			const hist = buildHistory(range, type);
 			for (const mode of MODES) {
 				write(`preview-${type}-${range}-${mode}.png`, renderHistoryChart(hist, type, undefined, mode));
 			}
+			if (type === 'stock') raw.push(dumpRaw(`stock ${range}`, hist));
 		}
 	}
-	console.log('done');
+	fs.writeFileSync(path.join(OUT, 'preview-rawdata.txt'), raw.join('\n'));
+	console.log(`done — raw data → ${path.join(OUT, 'preview-rawdata.txt')}`);
 }
 
 main();

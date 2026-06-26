@@ -48,33 +48,35 @@ interface Candle {
 // Bottom-band volume histogram drawn BEHIND the price, scaled to its own band so
 // a spike can't occlude the series. Each bar is tinted by its candle's direction
 // (up/down color) at low alpha so it reads as context, not a second series.
+// Candles/volume take precomputed per-bar x-positions (`xs`) rather than scaling
+// by timestamp. History candle mode spaces bars evenly by index so non-trading
+// gaps (nights, weekends) don't clump bars together or overlap them; the line
+// path still scales by time. `slotW` is the per-bar slot used for body width.
 function drawVolumeOverlay(
-	ctx: any, candles: Candle[], xScale: (t: number) => number,
-	chartX: number, chartY: number, chartW: number, chartH: number,
+	ctx: any, candles: Candle[], xs: number[],
+	chartY: number, chartH: number, slotW: number,
 	upColor: string, downColor: string,
 ) {
 	const vMax = Math.max(...candles.map(c => c.volume ?? 0));
 	if (vMax <= 0) return;
 	const bandH = chartH * 0.34;
-	const slot = chartW / candles.length;
-	const w = Math.max(1, Math.min(slot * 0.7, 14));
-	for (const c of candles) {
-		if (!c.volume) continue;
+	const w = Math.max(1, Math.min(slotW * 0.7, 14));
+	candles.forEach((c, i) => {
+		if (!c.volume) return;
 		const h = (c.volume / vMax) * bandH;
 		ctx.fillStyle = hexToRgba(c.close >= c.open ? upColor : downColor, 0.3);
-		ctx.fillRect(xScale(c.t) - w / 2, chartY + chartH - h, w, h);
-	}
+		ctx.fillRect(xs[i] - w / 2, chartY + chartH - h, w, h);
+	});
 }
 
 function drawCandles(
-	ctx: any, candles: Candle[], xScale: (t: number) => number, yScale: (v: number) => number,
-	upColor: string, downColor: string, chartW: number,
+	ctx: any, candles: Candle[], xs: number[], yScale: (v: number) => number,
+	upColor: string, downColor: string, slotW: number,
 ) {
-	const slot = chartW / candles.length;
-	const w = Math.max(1, Math.min(slot * 0.7, 14));
-	for (const c of candles) {
+	const w = Math.max(1, Math.min(slotW * 0.7, 14));
+	candles.forEach((c, i) => {
 		const col = c.close >= c.open ? upColor : downColor;
-		const x = xScale(c.t);
+		const x = xs[i];
 		ctx.strokeStyle = col;
 		ctx.lineWidth = 1;
 		ctx.beginPath();
@@ -84,7 +86,7 @@ function drawCandles(
 		const yo = yScale(c.open), yc = yScale(c.close);
 		ctx.fillStyle = col;
 		ctx.fillRect(x - w / 2, Math.min(yo, yc), w, Math.max(1, Math.abs(yc - yo)));
-	}
+	});
 }
 
 // Price labels inside the plot at the right edge, each on a panel-colored backing
@@ -131,10 +133,42 @@ function drawFundamentalsStrip(ctx: any, fund: StripFundamentals, x: number, y: 
 		segs.push(`NEXT ER  ${d}`);
 	}
 	if (!segs.length) return;
+	// Divider above the strip, positioned so the gap above the text matches the
+	// gap below it (the strip baseline is 8px above the chart panel top).
+	ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+	ctx.lineWidth = 1;
+	ctx.beginPath();
+	ctx.moveTo(x, y - 15);
+	ctx.lineTo(W - 28, y - 15);
+	ctx.stroke();
 	ctx.font = '12.5px Inter';
 	ctx.fillStyle = COLORS.dim;
 	ctx.textAlign = 'left';
-	ctx.fillText(segs.join('      ·      '), x, y);
+	ctx.fillText(segs.join('  ·  '), x, y);
+}
+
+// Horizontal range track ("where in the range is price now"). Shared by the live
+// view (DAY / 52WK) and the history views (the interval's own low→high / 52WK).
+function drawRangeBar(
+	ctx: any, chartX: number, chartW: number, lineColor: string,
+	label: string, lo: number, hi: number, cur: number, y: number,
+) {
+	ctx.fillStyle = COLORS.dim;
+	ctx.font = '12px Inter';
+	ctx.textAlign = 'left';
+	ctx.fillText(label, chartX, y - 6);
+	ctx.textAlign = 'right';
+	ctx.fillText(`$${fmtPrice(lo)}  —  $${fmtPrice(hi)}`, chartX + chartW, y - 6);
+	ctx.textAlign = 'left';
+	const trackH = 6;
+	ctx.fillStyle = '#3A3C42';
+	ctx.fillRect(chartX, y, chartW, trackH);
+	const ratio = Math.max(0, Math.min(1, (cur - lo) / Math.max(0.0001, hi - lo)));
+	const pos = ratio * chartW;
+	ctx.fillStyle = lineColor;
+	ctx.fillRect(chartX, y, pos, trackH);
+	ctx.fillStyle = '#FFFFFF';
+	ctx.fillRect(chartX + pos - 1.5, y - 2, 3, trackH + 4);
 }
 
 interface TypeColors {
@@ -300,7 +334,7 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 	ctx.textAlign = 'left';
 
 	// Chart panel
-	const chartX = 28, chartY = 130, chartW = W - 56, chartH = 170;
+	const chartX = 28, chartY = 130, chartW = W - 56, chartH = 195;
 	ctx.fillStyle = COLORS.panel;
 	ctx.fillRect(chartX, chartY, chartW, chartH);
 
@@ -371,7 +405,10 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 	ctx.setLineDash([]);
 	ctx.fillStyle = COLORS.dim;
 	ctx.font = '11px Inter';
-	ctx.fillText(`prev $${fmtPrice(price.prev_close)}`, chartX + 6, py - 4);
+	// Label sits above the line, but drops below it when the line is near the panel
+	// top (a down day) so it doesn't collide with the fundamentals strip above.
+	const prevLabelY = py - 4 < chartY + 14 ? py + 13 : py - 4;
+	ctx.fillText(`prev $${fmtPrice(price.prev_close)}`, chartX + 6, prevLabelY);
 
 	// Split series into pre / regular / post slices for differentiated styling
 	const preSlice = series.filter(p => p.t <= regStart);
@@ -403,8 +440,12 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 	}
 
 	if (mode === 'candle') {
-		drawVolumeOverlay(ctx, candles, xScale, chartX, chartY, chartW, chartH, palette.line, TYPE_PALETTE[type].down.line);
-		drawCandles(ctx, candles, xScale, yScale, palette.line, TYPE_PALETTE[type].down.line, chartW);
+		// Intraday bars are contiguous (one session), so time-based x keeps them
+		// aligned with the session-dimming bands.
+		const slotW = chartW / candles.length;
+		const xs = candles.map(c => xScale(c.t));
+		drawVolumeOverlay(ctx, candles, xs, chartY, chartH, slotW, palette.line, TYPE_PALETTE[type].down.line);
+		drawCandles(ctx, candles, xs, yScale, palette.line, TYPE_PALETTE[type].down.line, slotW);
 	}
 	else {
 		fillSlice(preSlice, palette.fillDim);
@@ -433,37 +474,18 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 	// Y-axis price labels inside the plot at the right edge
 	drawYLabels(ctx, chartX, chartY, chartW, chartH, yMax, ySpan);
 
-	// Day & 52wk range tracks (line mode only — candle mode shows OHLC + volume)
-	function drawRangeBar(label: string, lo: number, hi: number, cur: number, y: number) {
-		ctx.fillStyle = COLORS.dim;
-		ctx.font = '12px Inter';
-		ctx.fillText(label, chartX, y - 6);
-		ctx.textAlign = 'right';
-		ctx.fillText(`$${fmtPrice(lo)}  —  $${fmtPrice(hi)}`, chartX + chartW, y - 6);
-		ctx.textAlign = 'left';
-		const trackH = 6;
-		ctx.fillStyle = '#3A3C42';
-		ctx.fillRect(chartX, y, chartW, trackH);
-		const ratio = Math.max(0, Math.min(1, (cur - lo) / Math.max(0.0001, hi - lo)));
-		const pos = ratio * chartW;
-		ctx.fillStyle = palette.line;
-		ctx.fillRect(chartX, y, pos, trackH);
-		ctx.fillStyle = '#FFFFFF';
-		ctx.fillRect(chartX + pos - 1.5, y - 2, 3, trackH + 4);
-	}
-
-	// Range bars show in both modes — volume is an in-panel overlay now, so the
-	// space below the chart is free regardless of line vs candle.
+	// Day & 52wk range tracks. Shown in both modes — volume is an in-panel overlay
+	// now, so the space below the chart is free regardless of line vs candle.
 	const barY = chartY + chartH + 24;
 	if (price.low > 0 && price.high > price.low) {
 		drawRangeBar(
-			`DAY  L $${fmtPrice(price.low)} → H $${fmtPrice(price.high)}`,
+			ctx, chartX, chartW, palette.line, 'DAY',
 			price.low, price.high, price.regular_close ?? price.price, barY,
 		);
 	}
 	if (price.week52_low && price.week52_high && price.week52_high > price.week52_low) {
 		drawRangeBar(
-			`52WK  $${fmtPrice(price.week52_low)} → $${fmtPrice(price.week52_high)}`,
+			ctx, chartX, chartW, palette.line, '52WK',
 			price.week52_low, price.week52_high, price.price, barY + 34,
 		);
 	}
@@ -551,13 +573,18 @@ export function renderHistoryChart(data: HistoryData, type: AssetType, displayNa
 	const prices = pts.map(p => p.price);
 	const hi = Math.max(...prices);
 	const lo = Math.min(...prices);
+	// True interval high/low includes each bar's intraday extremes (not just
+	// closes), so HIGH/LOW and the range bar match the same basis Yahoo uses for
+	// its 52-week range. The chart y-scale still uses closes (line) / wicks (candle).
+	const trueHi = Math.max(...pts.map(p => p.high ?? p.price));
+	const trueLo = Math.min(...pts.map(p => p.low ?? p.price));
 	// Same four labels as the live view; values are window-relative (the dashed
 	// baseline and "over <range>" header make clear PREV CLOSE = window start).
 	const stats: Array<{ label: string; value: string }> = [
 		{ label: 'PREV CLOSE', value: `$${fmtPrice(first)}` },
 		{ label: 'OPEN', value: `$${fmtPrice(pts[0].open ?? first)}` },
-		{ label: 'HIGH', value: `$${fmtPrice(hi)}` },
-		{ label: 'LOW', value: `$${fmtPrice(lo)}` },
+		{ label: 'HIGH', value: `$${fmtPrice(trueHi)}` },
+		{ label: 'LOW', value: `$${fmtPrice(trueLo)}` },
 	];
 	const statsRight = W - 28;
 	const statsLeft = statsRight - 150;
@@ -575,7 +602,10 @@ export function renderHistoryChart(data: HistoryData, type: AssetType, displayNa
 	}
 	ctx.textAlign = 'left';
 
-	const chartX = 28, chartY = 130, chartW = W - 56, chartH = 210;
+	// 52WK track is shown except on the 1Y view, where it just duplicates the
+	// interval range. With only one range bar the panel grows to fill the space.
+	const showWk52 = data.range !== '1y' && !!(data.week52_low && data.week52_high && data.week52_high > data.week52_low);
+	const chartX = 28, chartY = 130, chartW = W - 56, chartH = showWk52 ? 178 : 202;
 	ctx.fillStyle = COLORS.panel;
 	ctx.fillRect(chartX, chartY, chartW, chartH);
 
@@ -602,6 +632,11 @@ export function renderHistoryChart(data: HistoryData, type: AssetType, displayNa
 	const ySpan = Math.max(0.0001, yMax - yMin);
 	const yScale = (v: number) => chartY + chartH - ((v - yMin) / ySpan) * chartH;
 
+	// Candle mode spaces bars evenly by index (so overnight/weekend gaps don't
+	// clump or overlap them); the line path scales by time.
+	const slotW = chartW / candles.length;
+	const candleXs = candles.map((_, i) => chartX + (i + 0.5) * slotW);
+
 	// Gridlines (labels drawn later, on top of the price line)
 	ctx.lineWidth = 1;
 	ctx.strokeStyle = COLORS.grid;
@@ -614,7 +649,7 @@ export function renderHistoryChart(data: HistoryData, type: AssetType, displayNa
 	}
 
 	// Volume histogram behind the price (candle mode only)
-	if (effMode === 'candle') drawVolumeOverlay(ctx, candles, xScale, chartX, chartY, chartW, chartH, palette.line, downColor);
+	if (effMode === 'candle') drawVolumeOverlay(ctx, candles, candleXs, chartY, chartH, slotW, palette.line, downColor);
 
 	// Window-start baseline
 	ctx.strokeStyle = COLORS.prevLine;
@@ -627,7 +662,7 @@ export function renderHistoryChart(data: HistoryData, type: AssetType, displayNa
 	ctx.setLineDash([]);
 
 	if (effMode === 'candle') {
-		drawCandles(ctx, candles, xScale, yScale, palette.line, downColor, chartW);
+		drawCandles(ctx, candles, candleXs, yScale, palette.line, downColor, slotW);
 	}
 	else {
 		ctx.beginPath();
@@ -658,17 +693,38 @@ export function renderHistoryChart(data: HistoryData, type: AssetType, displayNa
 	// Y-axis price labels inside the plot at the right edge
 	drawYLabels(ctx, chartX, chartY, chartW, chartH, yMax, ySpan);
 
-	// X-axis date labels
+	// X-axis date labels. In candle mode they track evenly-spaced bar indices (to
+	// match the candles); in line mode they track time.
 	const labelCount = 5;
 	const spanDays = span / 86400;
 	ctx.fillStyle = COLORS.dim;
 	ctx.font = '11px Inter';
 	for (let i = 0; i <= labelCount; i++) {
-		const t = tMin + (span / labelCount) * i;
+		let center: number, t: number;
+		if (effMode === 'candle') {
+			const idx = Math.round((pts.length - 1) * (i / labelCount));
+			center = candleXs[idx];
+			t = pts[idx].t;
+		}
+		else {
+			t = tMin + (span / labelCount) * i;
+			center = xScale(t);
+		}
 		const label = formatAxisDate(t, spanDays);
 		const w = ctx.measureText(label).width;
-		const lx = Math.max(chartX, Math.min(chartX + chartW - w, xScale(t) - w / 2));
+		const lx = Math.max(chartX, Math.min(chartX + chartW - w, center - w / 2));
 		ctx.fillText(label, lx, chartY + chartH + 18);
+	}
+
+	// Range tracks: the interval's own low→high, then the 52-week range — same
+	// "where in the range is price" read as the live view's DAY / 52WK bars. The
+	// 52WK track is hidden on the 1Y view, where it just duplicates the interval.
+	const rangeBarY = chartY + chartH + 42;
+	if (trueHi > trueLo) {
+		drawRangeBar(ctx, chartX, chartW, palette.line, rangeLabel, trueLo, trueHi, last, rangeBarY);
+	}
+	if (showWk52) {
+		drawRangeBar(ctx, chartX, chartW, palette.line, '52WK', data.week52_low!, data.week52_high!, last, rangeBarY + 34);
 	}
 
 	drawFundamentalsStrip(ctx, data, 28, 122);

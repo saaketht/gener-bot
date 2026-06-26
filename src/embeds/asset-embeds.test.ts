@@ -269,7 +269,7 @@ describe('timeframe buttons', () => {
 		const buttons = buildTimeframeRows('AAPL', 'stock', '3m', 'line').flatMap(r => r.toJSON().components) as any[];
 		const toggle = buttons.find(b => b.custom_id?.startsWith('asset_mode_'));
 		expect(toggle.custom_id).toBe('asset_mode_candle_3m_stock_AAPL');
-		expect(toggle.label).toBe('Candles');
+		expect(toggle.emoji?.name).toBe('🕯️');
 		expect(toggle.disabled).toBeFalsy();
 	});
 

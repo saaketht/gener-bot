@@ -218,7 +218,7 @@ export function buildTimeframeRows(displaySymbol: string, type: AssetType, activ
 	lastRow.addComponents(
 		new ButtonBuilder()
 			.setCustomId(`asset_mode_${target}_${active}_${type}_${displaySymbol}`)
-			.setLabel(mode === 'candle' ? 'Line' : 'Candles')
+			.setEmoji(target === 'candle' ? '🕯️' : '📈')
 			.setStyle(ButtonStyle.Secondary)
 			.setDisabled(!candleAllowed(active)),
 	);
