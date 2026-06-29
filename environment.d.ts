@@ -9,6 +9,9 @@ declare global {
             // AI
             AI_SYSTEM_PROMPT: string;
             ANTHROPIC_API_KEY: string;
+            // Set to 'true' to route financial/ticker queries to Grok instead of Claude
+            // (e.g. when out of Claude credits). Claude calls that fail also fall back to Grok.
+            CLAUDE_DISABLED?: string;
             GROK_API_KEY: string;
             FINNHUB_API_KEY: string;
             // APIs

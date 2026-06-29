@@ -32,6 +32,12 @@ const MAX_TOKENS = 512;
 const CLAUDE_MAX_TOKENS = 2048;
 const DEFAULT_PROMPT = 'You are generbot, a concise and direct AI assistant.';
 
+// Claude handles financial/ticker queries (grounded, no hallucination). When it's
+// unavailable — no key, or set CLAUDE_DISABLED=true while out of credits — financial
+// queries fall back to Grok using the same finance prompt + tools. A live Claude call
+// that throws also falls back to Grok rather than erroring out (see execute()).
+const CLAUDE_ENABLED = !!process.env.ANTHROPIC_API_KEY && process.env.CLAUDE_DISABLED !== 'true';
+
 // Detect financial intent: $TICKER notation or explicit financial keywords
 const FINANCIAL_TICKER_RE = /\$[A-Za-z]{1,6}\b/;
 const FINANCIAL_KW_RE = /\b(price|option|beta|volume|market.?cap|earnings|dividend|ticker|stock|crypto|etf|put|call|implied.?vol|iv.?rank|p\/e|short.?interest|float|shares|bullish|bearish|expir|strike|hedge|portfolio)\b/i;
@@ -622,6 +628,101 @@ async function getClaudeFinancialResponse(
 	return { text, sentEmbedIds: ctx.sentEmbedIds };
 }
 
+// Grok response (Responses API + web search + shared tools). Used for chat/banter and,
+// when Claude is unavailable, as the financial fallback — the finance system prompt and
+// the same SHARED_TOOLS (lookup_ticker/get_price/...) keep it grounded. Returns empty
+// text on abort; the caller checks signal.aborted before surfacing any error.
+async function getGrokResponse(
+	systemPrompt: string,
+	buffered: ChatTurn[],
+	message: Message,
+	referencedMessage: Message | null,
+	wrappedUserText: string,
+	signal: AbortSignal,
+): Promise<{ text: string; sentEmbedIds: string[] }> {
+	const input: any[] = [];
+	for (const turn of buffered) {
+		input.push({ role: turn.role, content: turn.content });
+	}
+
+	// Collect images from both the current message and the replied-to message
+	const refImages = referencedMessage ? extractImageUrls(referencedMessage) : [];
+	const userImages = extractImageUrls(message);
+	const allImages = [...refImages, ...userImages];
+
+	let userContent: string | Array<Record<string, unknown>>;
+	if (allImages.length > 0) {
+		const parts: Array<Record<string, unknown>> = [];
+		for (const url of allImages) {
+			parts.push({ type: 'input_image', image_url: grokImageUrl(url) });
+		}
+		parts.push({ type: 'input_text', text: wrappedUserText });
+		userContent = parts;
+	}
+	else {
+		userContent = wrappedUserText;
+	}
+	input.push({ role: 'user', content: userContent });
+	logger.debug(`grok turns (${input.length}): ${input.map((t: any) => t.role).join(',')}`);
+
+	const ctx: ToolContext = { guildId: message.guildId, message, tickerCache: new Map(), sentEmbedIds: [] };
+
+	let response = await grok.responses.create({
+		model: MODEL,
+		max_output_tokens: MAX_TOKENS,
+		instructions: systemPrompt,
+		input,
+		tools: GROK_TOOLS,
+	} as any, { signal });
+
+	if (signal.aborted) return { text: '', sentEmbedIds: ctx.sentEmbedIds };
+
+	// Multi-round tool loop for client-side function calls (up to 3 rounds)
+	const MAX_GROK_ROUNDS = 3;
+	let grokRounds = 0;
+	let functionCalls: any[] = response.output.filter((item: any) => item.type === 'function_call');
+
+	while (functionCalls.length > 0 && grokRounds < MAX_GROK_ROUNDS) {
+		grokRounds++;
+		// Add all output items (including server-side web_search_call) back as context
+		input.push(...response.output);
+
+		for (const call of functionCalls) {
+			let args: Record<string, any>;
+			try {
+				args = JSON.parse(call.arguments);
+			}
+			catch {
+				logger.warn(`grok sent unparseable tool args for ${call.name}: ${call.arguments}`);
+				args = {};
+			}
+			const result = await executeTool(call.name, args, ctx)
+				?? JSON.stringify({ error: `unknown tool: ${call.name}` });
+			input.push({
+				type: 'function_call_output',
+				call_id: call.call_id,
+				output: result,
+			});
+		}
+
+		response = await grok.responses.create({
+			model: MODEL,
+			max_output_tokens: MAX_TOKENS,
+			instructions: systemPrompt,
+			input,
+			tools: GROK_TOOLS,
+		} as any, { signal });
+
+		if (signal.aborted) return { text: '', sentEmbedIds: ctx.sentEmbedIds };
+		functionCalls = response.output.filter((item: any) => item.type === 'function_call');
+	}
+
+	const tokens = response.usage as any;
+	logger.info(`tokens used { input: ${tokens?.input_tokens}, output: ${tokens?.output_tokens} }, total: ${(tokens?.input_tokens ?? 0) + (tokens?.output_tokens ?? 0)}`);
+
+	return { text: response.output_text ?? '', sentEmbedIds: ctx.sentEmbedIds };
+}
+
 const messageEvent: MessageEvent = {
 	name: 'ai-complete',
 	async execute(message: Message) {
@@ -711,8 +812,10 @@ const messageEvent: MessageEvent = {
 		const explicitFinancial = isFinancialQuery(message.content);
 		const stickyClaude = !explicitFinancial && lastChannelModel(channelId) === 'claude';
 		const financial = explicitFinancial || stickyClaude;
-		const routedModel = financial ? CLAUDE_MODEL : MODEL;
-		const routeNote = stickyClaude ? ' (sticky)' : '';
+		// Financial → Claude when available, otherwise Grok fallback (same finance prompt + tools).
+		const useClaude = financial && CLAUDE_ENABLED;
+		const routedModel = useClaude ? CLAUDE_MODEL : MODEL;
+		const routeNote = `${stickyClaude ? ' (sticky)' : ''}${financial && !useClaude ? ' (grok-fallback)' : ''}`;
 		logger.info(`${message.author.username} ran ai [${routedModel}${routeNote}]: ${rawUserText.substring(0, 50)}...`);
 
 		const abortController = new AbortController();
@@ -726,14 +829,16 @@ const messageEvent: MessageEvent = {
 
 			let completion: string;
 			let toolEmbedIds: string[] = [];
+			let modelUsed: ChatModel = useClaude ? 'claude' : 'grok';
 
-			if (financial) {
+			const buffered = getChannelHistory(channelId);
+
+			if (useClaude) {
 				// Financial query → Claude (grounded, no hallucination)
 				const systemPrompt = buildFinancialSystemPrompt(userContextStr);
 
 				// Rolling per-channel history (text-only; current-turn images attached below)
 				const anthropicMessages: Anthropic.MessageParam[] = [];
-				const buffered = getChannelHistory(channelId);
 				for (const turn of buffered) {
 					anthropicMessages.push({ role: turn.role, content: turn.content });
 				}
@@ -760,108 +865,45 @@ const messageEvent: MessageEvent = {
 				anthropicMessages.push({ role: 'user', content: claudeContent });
 				logger.debug(`claude turns (${anthropicMessages.length}): ${anthropicMessages.map(m => m.role).join(',')}`);
 
-				const claudeResult = await getClaudeFinancialResponse(
-					systemPrompt,
-					anthropicMessages,
-					message.guildId,
-					message,
-					abortController.signal,
-				);
-				completion = claudeResult.text;
-				toolEmbedIds = claudeResult.sentEmbedIds;
+				try {
+					const claudeResult = await getClaudeFinancialResponse(
+						systemPrompt,
+						anthropicMessages,
+						message.guildId,
+						message,
+						abortController.signal,
+					);
+					completion = claudeResult.text;
+					toolEmbedIds = claudeResult.sentEmbedIds;
+				}
+				catch (err) {
+					// Claude failed mid-flight (e.g. out of credits) — fall back to Grok with the
+					// same finance prompt + tools rather than failing the request outright.
+					logger.warn('claude financial call failed; falling back to grok:', err);
+					if (abortController.signal.aborted) return;
+					const grokResult = await getGrokResponse(
+						systemPrompt, buffered, message, referencedMessage, wrappedUserText, abortController.signal,
+					);
+					completion = grokResult.text;
+					toolEmbedIds = grokResult.sentEmbedIds;
+					modelUsed = 'grok';
+				}
 			}
 			else {
-				// Chat/banter → Grok (Responses API with web search)
-				const systemPrompt = buildSystemPrompt(userContextStr);
-
-				// Conversation history from the rolling channel buffer — single source for
-				// both `ai` and replies. The replied-to message (if any) is already folded
-				// into wrappedUserText as a quote.
-				const input: any[] = [];
-				const buffered = getChannelHistory(channelId);
-				for (const turn of buffered) {
-					input.push({ role: turn.role, content: turn.content });
-				}
-
-				// Collect images from both the current message and the replied-to message
-				const refImages = referencedMessage ? extractImageUrls(referencedMessage) : [];
-				const userImages = extractImageUrls(message);
-				const allImages = [...refImages, ...userImages];
-
-				let userContent: string | Array<Record<string, unknown>>;
-				if (allImages.length > 0) {
-					const parts: Array<Record<string, unknown>> = [];
-					for (const url of allImages) {
-						parts.push({ type: 'input_image', image_url: grokImageUrl(url) });
-					}
-					parts.push({ type: 'input_text', text: wrappedUserText });
-					userContent = parts;
-				}
-				else {
-					userContent = wrappedUserText;
-				}
-				input.push({ role: 'user', content: userContent });
-				logger.debug(`grok turns (${input.length}): ${input.map((t: any) => t.role).join(',')}`);
-
-				const guildId = message.guildId;
-				const ctx: ToolContext = { guildId, message, tickerCache: new Map(), sentEmbedIds: [] };
-
-				let response = await grok.responses.create({
-					model: MODEL,
-					max_output_tokens: MAX_TOKENS,
-					instructions: systemPrompt,
-					input,
-					tools: GROK_TOOLS,
-				} as any, { signal: abortController.signal });
-
-				if (abortController.signal.aborted) return;
-
-				// Multi-round tool loop for client-side function calls (up to 3 rounds)
-				const MAX_GROK_ROUNDS = 3;
-				let grokRounds = 0;
-				let functionCalls: any[] = response.output.filter((item: any) => item.type === 'function_call');
-
-				while (functionCalls.length > 0 && grokRounds < MAX_GROK_ROUNDS) {
-					grokRounds++;
-					// Add all output items (including server-side web_search_call) back as context
-					input.push(...response.output);
-
-					for (const call of functionCalls) {
-						let args: Record<string, any>;
-						try {
-							args = JSON.parse(call.arguments);
-						}
-						catch {
-							logger.warn(`grok sent unparseable tool args for ${call.name}: ${call.arguments}`);
-							args = {};
-						}
-						const result = await executeTool(call.name, args, ctx)
-							?? JSON.stringify({ error: `unknown tool: ${call.name}` });
-						input.push({
-							type: 'function_call_output',
-							call_id: call.call_id,
-							output: result,
-						});
-					}
-
-					response = await grok.responses.create({
-						model: MODEL,
-						max_output_tokens: MAX_TOKENS,
-						instructions: systemPrompt,
-						input,
-						tools: GROK_TOOLS,
-					} as any, { signal: abortController.signal });
-
-					if (abortController.signal.aborted) return;
-					functionCalls = response.output.filter((item: any) => item.type === 'function_call');
-				}
-
-				completion = response.output_text ?? '';
-				toolEmbedIds = ctx.sentEmbedIds;
-
-				const tokens = response.usage as any;
-				logger.info(`tokens used { input: ${tokens?.input_tokens}, output: ${tokens?.output_tokens} }, total: ${(tokens?.input_tokens ?? 0) + (tokens?.output_tokens ?? 0)}`);
+				// Chat/banter, or financial fallback when Claude is disabled → Grok.
+				// GROK_TOOLS already includes the finance tools, so the fallback stays grounded;
+				// the finance system prompt keeps the finance-tuned behaviour.
+				const systemPrompt = financial
+					? buildFinancialSystemPrompt(userContextStr)
+					: buildSystemPrompt(userContextStr);
+				const grokResult = await getGrokResponse(
+					systemPrompt, buffered, message, referencedMessage, wrappedUserText, abortController.signal,
+				);
+				completion = grokResult.text;
+				toolEmbedIds = grokResult.sentEmbedIds;
 			}
+
+			if (abortController.signal.aborted) return;
 
 			if (!completion) {
 				await message.reply('Unable to generate response.');
@@ -907,7 +949,7 @@ const messageEvent: MessageEvent = {
 
 			// Append to per-channel rolling history for the next non-reply turn.
 			// The model tag drives sticky routing — Claude-rooted threads stay on Claude.
-			recordChannelTurns(channelId, wrappedUserText, wrapAssistant(completion), financial ? 'claude' : 'grok');
+			recordChannelTurns(channelId, wrappedUserText, wrapAssistant(completion), modelUsed);
 
 			// Store for "delete" command
 			if (sentIds.length > 0) {
