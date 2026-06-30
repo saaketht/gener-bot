@@ -38,6 +38,42 @@ const DEFAULT_PROMPT = 'You are generbot, a concise and direct AI assistant.';
 // that throws also falls back to Grok rather than erroring out (see execute()).
 const CLAUDE_ENABLED = !!process.env.ANTHROPIC_API_KEY && process.env.CLAUDE_DISABLED !== 'true';
 
+// ── Claude availability circuit breaker ──
+// There is no proactive credit check; availability is inferred from live calls. After
+// CLAUDE_FAILURE_THRESHOLD consecutive failures (e.g. out of credits) the circuit opens
+// and financial queries route straight to Grok — no per-request failed Claude call — for
+// CLAUDE_COOLDOWN_MS. Once the cooldown elapses the next financial request is allowed
+// through as a probe: success closes the circuit, failure re-opens it for another cooldown.
+// In-memory, so it resets on restart (same as the channel history / caches above).
+const CLAUDE_FAILURE_THRESHOLD = 3;
+const CLAUDE_COOLDOWN_MS = 30 * 60 * 1000;
+let claudeConsecutiveFailures = 0;
+// Timestamp the circuit opened; 0 means closed.
+let claudeCircuitOpenedAt = 0;
+
+// True when a Claude attempt is allowed: circuit closed, or open but cooled down (probe).
+function claudeCircuitAllows(): boolean {
+	if (claudeCircuitOpenedAt === 0) return true;
+	return Date.now() - claudeCircuitOpenedAt >= CLAUDE_COOLDOWN_MS;
+}
+
+function recordClaudeSuccess(): void {
+	if (claudeCircuitOpenedAt !== 0) {
+		logger.info('claude circuit closed after successful probe');
+	}
+	claudeConsecutiveFailures = 0;
+	claudeCircuitOpenedAt = 0;
+}
+
+function recordClaudeFailure(): void {
+	claudeConsecutiveFailures++;
+	if (claudeConsecutiveFailures >= CLAUDE_FAILURE_THRESHOLD) {
+		// (Re)open the circuit and restart the cooldown clock.
+		claudeCircuitOpenedAt = Date.now();
+		logger.warn(`claude circuit open (${claudeConsecutiveFailures} consecutive failures); routing financial queries to grok for ${CLAUDE_COOLDOWN_MS / 60000}min`);
+	}
+}
+
 // Detect financial intent: $TICKER notation or explicit financial keywords
 const FINANCIAL_TICKER_RE = /\$[A-Za-z]{1,6}\b/;
 const FINANCIAL_KW_RE = /\b(price|option|beta|volume|market.?cap|earnings|dividend|ticker|stock|crypto|etf|put|call|implied.?vol|iv.?rank|p\/e|short.?interest|float|shares|bullish|bearish|expir|strike|hedge|portfolio)\b/i;
@@ -813,9 +849,13 @@ const messageEvent: MessageEvent = {
 		const stickyClaude = !explicitFinancial && lastChannelModel(channelId) === 'claude';
 		const financial = explicitFinancial || stickyClaude;
 		// Financial → Claude when available, otherwise Grok fallback (same finance prompt + tools).
-		const useClaude = financial && CLAUDE_ENABLED;
+		// The circuit breaker skips Claude entirely while it's open, so we don't pay a failed
+		// Claude call on every financial query during an outage.
+		const useClaude = financial && CLAUDE_ENABLED && claudeCircuitAllows();
 		const routedModel = useClaude ? CLAUDE_MODEL : MODEL;
-		const routeNote = `${stickyClaude ? ' (sticky)' : ''}${financial && !useClaude ? ' (grok-fallback)' : ''}`;
+		const circuitOpen = financial && CLAUDE_ENABLED && !claudeCircuitAllows();
+		const fallbackNote = circuitOpen ? ' (grok-fallback: claude circuit open)' : (financial && !useClaude ? ' (grok-fallback)' : '');
+		const routeNote = `${stickyClaude ? ' (sticky)' : ''}${fallbackNote}`;
 		logger.info(`${message.author.username} ran ai [${routedModel}${routeNote}]: ${rawUserText.substring(0, 50)}...`);
 
 		const abortController = new AbortController();
@@ -875,10 +915,13 @@ const messageEvent: MessageEvent = {
 					);
 					completion = claudeResult.text;
 					toolEmbedIds = claudeResult.sentEmbedIds;
+					if (!abortController.signal.aborted) recordClaudeSuccess();
 				}
 				catch (err) {
-					// Claude failed mid-flight (e.g. out of credits) — fall back to Grok with the
-					// same finance prompt + tools rather than failing the request outright.
+					// Claude failed mid-flight (e.g. out of credits) — record the failure (may trip
+					// the circuit) and fall back to Grok with the same finance prompt + tools rather
+					// than failing the request outright.
+					recordClaudeFailure();
 					logger.warn('claude financial call failed; falling back to grok:', err);
 					if (abortController.signal.aborted) return;
 					const grokResult = await getGrokResponse(
