@@ -1,6 +1,6 @@
 import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
 import * as path from 'path';
-import { PriceData, AssetType } from '../utils/priceApi';
+import { PriceData, HistoryData, AssetType, RANGE_LABELS } from '../utils/priceApi';
 
 GlobalFonts.registerFromPath(path.join(__dirname, 'fonts/Inter-Regular.ttf'), 'Inter');
 GlobalFonts.registerFromPath(path.join(__dirname, 'fonts/Inter-Bold.ttf'), 'Inter');
@@ -38,10 +38,24 @@ const TYPE_PALETTE: Record<AssetType, { up: UpDown; down: UpDown }> = {
 	},
 };
 
-export interface WatchlistItem {
-	price: PriceData;
-	type: AssetType;
+interface SeriesPoint { t: number; price: number }
+
+// Normalized row the renderer consumes — works for the live (1d) view or any
+// history window. Built from a PriceData or HistoryData via the helpers below.
+export interface WatchlistRow {
+	symbol: string;
 	displayName?: string;
+	type: AssetType;
+	rangeLabel: string;
+	last: number;
+	changeAbs: number;
+	changePct: number;
+	baseline: number;
+	series: SeriesPoint[];
+	rangeLo?: number;
+	rangeHi?: number;
+	week52Lo?: number;
+	week52Hi?: number;
 }
 
 function fmt(v: number, d = 2): string {
@@ -52,33 +66,55 @@ function fmtPrice(v: number): string {
 	return v >= 1 ? fmt(v, 2) : v.toFixed(4);
 }
 
-interface Point { t: number; price: number }
-
-function cleanSeries(price: PriceData): Point[] {
+// Live (1d) row: intraday series, change vs prev close, day + 52wk ranges.
+export function rowFromPrice(price: PriceData, type: AssetType, displayName?: string): WatchlistRow {
+	const series: SeriesPoint[] = [];
 	const intraday = price.intraday;
-	if (!intraday) return [];
-	const pts: Point[] = [];
-	for (let i = 0; i < intraday.timestamps.length; i++) {
-		const c = intraday.closes[i];
-		if (c == null) continue;
-		pts.push({ t: intraday.timestamps[i], price: c });
+	if (intraday) {
+		for (let i = 0; i < intraday.timestamps.length; i++) {
+			const c = intraday.closes[i];
+			if (c != null) series.push({ t: intraday.timestamps[i], price: c });
+		}
 	}
-	return pts;
+	return {
+		symbol: price.symbol, displayName: displayName ?? price.name, type, rangeLabel: 'DAY',
+		last: price.price, changeAbs: price.price - price.prev_close, changePct: price.change_pct,
+		baseline: price.prev_close, series,
+		rangeLo: price.low, rangeHi: price.high,
+		week52Lo: price.week52_low, week52Hi: price.week52_high,
+	};
 }
 
-export function renderWatchlistCard(items: WatchlistItem[]): Buffer | null {
-	if (items.length < 2) return null;
+// History (window) row: window series, change vs the window's first point, the
+// interval's own low→high (intraday-inclusive) and the 52wk range.
+export function rowFromHistory(data: HistoryData, type: AssetType, displayName?: string): WatchlistRow {
+	const series: SeriesPoint[] = data.points.map(p => ({ t: p.t, price: p.price }));
+	const first = series[0]?.price ?? 0;
+	const last = series[series.length - 1]?.price ?? first;
+	return {
+		symbol: data.symbol, displayName: displayName ?? data.name, type,
+		rangeLabel: RANGE_LABELS[data.range] ?? data.range.toUpperCase(),
+		last, changeAbs: last - first, changePct: first ? ((last - first) / first) * 100 : 0,
+		baseline: first, series,
+		rangeLo: Math.min(...data.points.map(p => p.low ?? p.price)),
+		rangeHi: Math.max(...data.points.map(p => p.high ?? p.price)),
+		week52Lo: data.week52_low, week52Hi: data.week52_high,
+	};
+}
 
-	const H = PAD_Y * 2 + items.length * ROW_H;
+export function renderWatchlistCard(rows: WatchlistRow[]): Buffer | null {
+	if (rows.length < 2) return null;
+
+	const H = PAD_Y * 2 + rows.length * ROW_H;
 	const canvas = createCanvas(W, H);
 	const ctx = canvas.getContext('2d');
 
 	ctx.fillStyle = COLORS.bg;
 	ctx.fillRect(0, 0, W, H);
 
-	for (let i = 0; i < items.length; i++) {
-		drawRow(ctx, items[i], PAD_Y + i * ROW_H, i);
-		if (i < items.length - 1) {
+	for (let i = 0; i < rows.length; i++) {
+		drawRow(ctx, rows[i], PAD_Y + i * ROW_H, i);
+		if (i < rows.length - 1) {
 			ctx.fillStyle = COLORS.divider;
 			ctx.fillRect(PAD_X, PAD_Y + (i + 1) * ROW_H - 1, W - 2 * PAD_X, 1);
 		}
@@ -87,11 +123,9 @@ export function renderWatchlistCard(items: WatchlistItem[]): Buffer | null {
 	return canvas.toBuffer('image/png');
 }
 
-function drawRow(ctx: any, item: WatchlistItem, top: number, idx: number) {
-	const { price, type, displayName } = item;
-	const isUp = price.change_pct >= 0;
-	const palette = TYPE_PALETTE[type][isUp ? 'up' : 'down'];
-	const change = price.price - price.prev_close;
+function drawRow(ctx: any, row: WatchlistRow, top: number, idx: number) {
+	const isUp = row.changePct >= 0;
+	const palette = TYPE_PALETTE[row.type][isUp ? 'up' : 'down'];
 
 	if (idx % 2 === 1) {
 		ctx.fillStyle = COLORS.rowAlt;
@@ -103,46 +137,41 @@ function drawRow(ctx: any, item: WatchlistItem, top: number, idx: number) {
 	// Column 1: ticker + company name
 	ctx.fillStyle = COLORS.text;
 	ctx.font = 'bold 22px Inter';
-	ctx.fillText(price.symbol, PAD_X + 8, rowInner + 22);
+	ctx.fillText(row.symbol, PAD_X + 8, rowInner + 22);
 
-	const name = displayName ?? price.name;
-	if (name) {
+	if (row.displayName) {
 		ctx.fillStyle = COLORS.dim;
 		ctx.font = '12px Inter';
-		const truncated = name.length > 28 ? name.slice(0, 26) + '…' : name;
+		const truncated = row.displayName.length > 28 ? row.displayName.slice(0, 26) + '…' : row.displayName;
 		ctx.fillText(truncated, PAD_X + 8, rowInner + 42);
 	}
 
-	// Day range mini-bar (col 1, bottom row)
-	if (price.high > price.low) {
-		drawMiniRange(ctx, 'DAY', price.low, price.high, price.price, palette.line, PAD_X + 8, rowInner + 60, 160);
+	// Range mini-bars (col 1 + col 2 bottom row): the interval's own range, then 52wk
+	if (row.rangeLo != null && row.rangeHi != null && row.rangeHi > row.rangeLo) {
+		drawMiniRange(ctx, row.rangeLabel, row.rangeLo, row.rangeHi, row.last, palette.line, PAD_X + 8, rowInner + 60, 160);
+	}
+	if (row.week52Lo != null && row.week52Hi != null && row.week52Hi > row.week52Lo) {
+		drawMiniRange(ctx, '52W', row.week52Lo, row.week52Hi, row.last, palette.line, PAD_X + 230, rowInner + 60, 160);
 	}
 
-	// 52-week range mini-bar (col 2, bottom row, under price/change)
-	if (price.week52_high && price.week52_low && price.week52_high > price.week52_low) {
-		drawMiniRange(ctx, '52W', price.week52_low, price.week52_high, price.price, palette.line, PAD_X + 230, rowInner + 60, 160);
-	}
-
-	// Column 2: price + change
+	// Column 2: price + change (with the timeframe so the window is clear)
 	const priceX = PAD_X + 230;
 	ctx.fillStyle = palette.line;
 	ctx.font = 'bold 22px Inter';
-	ctx.fillText(`$${fmtPrice(price.price)}`, priceX, rowInner + 22);
+	ctx.fillText(`$${fmtPrice(row.last)}`, priceX, rowInner + 22);
 
 	ctx.font = '13px Inter';
 	const arrow = isUp ? '▲' : '▼';
 	const sign = isUp ? '+' : '-';
 	ctx.fillText(
-		`${arrow} ${sign}$${fmt(Math.abs(change))}  (${sign}${Math.abs(price.change_pct).toFixed(2)}%)`,
+		`${arrow} ${sign}$${fmt(Math.abs(row.changeAbs))}  (${sign}${Math.abs(row.changePct).toFixed(2)}%)  ·  ${row.rangeLabel}`,
 		priceX, rowInner + 42,
 	);
 
-	// Column 3: sparkline
+	// Column 3: sparkline over the window
 	const sparkX = PAD_X + 430;
 	const sparkW = W - PAD_X - sparkX - 8;
-	const sparkY = rowInner + 4;
-	const sparkH = ROW_H - 20;
-	drawSparkline(ctx, price, palette, sparkX, sparkY, sparkW, sparkH);
+	drawSparkline(ctx, row, palette, sparkX, rowInner + 4, sparkW, ROW_H - 20);
 }
 
 function drawMiniRange(ctx: any, label: string, lo: number, hi: number, cur: number, color: string, x: number, y: number, w: number) {
@@ -165,8 +194,8 @@ function drawMiniRange(ctx: any, label: string, lo: number, hi: number, cur: num
 	ctx.textAlign = 'left';
 }
 
-function drawSparkline(ctx: any, price: PriceData, palette: UpDown, x: number, y: number, w: number, h: number) {
-	const series = cleanSeries(price);
+function drawSparkline(ctx: any, row: WatchlistRow, palette: UpDown, x: number, y: number, w: number, h: number) {
+	const series = row.series;
 	if (series.length < 2) return;
 
 	ctx.fillStyle = COLORS.panel;
@@ -176,19 +205,19 @@ function drawSparkline(ctx: any, price: PriceData, palette: UpDown, x: number, y
 	const tMax = series[series.length - 1].t;
 	const tSpan = Math.max(1, tMax - tMin);
 	const prices = series.map(p => p.price);
-	const yMin = Math.min(...prices, price.prev_close) - 0.05;
-	const yMax = Math.max(...prices, price.prev_close) + 0.05;
+	const yMin = Math.min(...prices, row.baseline) - 0.05;
+	const yMax = Math.max(...prices, row.baseline) + 0.05;
 	const ySpan = Math.max(0.01, yMax - yMin);
 	const xS = (t: number) => x + ((t - tMin) / tSpan) * w;
 	const yS = (v: number) => y + h - ((v - yMin) / ySpan) * h;
 
-	// Prev close reference
+	// Baseline reference (prev close for 1d, window start otherwise)
 	ctx.strokeStyle = COLORS.prevLine;
 	ctx.setLineDash([3, 3]);
 	ctx.beginPath();
-	const py = yS(price.prev_close);
-	ctx.moveTo(x, py);
-	ctx.lineTo(x + w, py);
+	const by = yS(row.baseline);
+	ctx.moveTo(x, by);
+	ctx.lineTo(x + w, by);
 	ctx.stroke();
 	ctx.setLineDash([]);
 
@@ -205,12 +234,11 @@ function drawSparkline(ctx: any, price: PriceData, palette: UpDown, x: number, y
 	ctx.strokeStyle = palette.line;
 	ctx.lineWidth = 1.8;
 	ctx.beginPath();
-	for (let i = 0; i < series.length; i++) {
-		const px = xS(series[i].t);
-		const pyy = yS(series[i].price);
-		if (i === 0) ctx.moveTo(px, pyy);
-		else ctx.lineTo(px, pyy);
-	}
+	series.forEach((p, i) => {
+		const px = xS(p.t), py = yS(p.price);
+		if (i === 0) ctx.moveTo(px, py);
+		else ctx.lineTo(px, py);
+	});
 	ctx.stroke();
 
 	// End dot

@@ -7,6 +7,7 @@ import { rateLimiter } from '../utils/rateLimiter';
 import logger from '../utils/logger';
 import { parseTradesCSV } from '../embeds/pnl-embeds';
 import { resolveAssetView, buildTimeframeRows, parseTimeframeCustomId } from '../embeds/asset-embeds';
+import { resolveWatchlistView } from '../utils/watchlist';
 import { getUniqueTradingDays, getRecapEmbed } from '../embeds/recap-embeds';
 
 const interactionCreateEvent = {
@@ -81,6 +82,41 @@ const interactionCreateEvent = {
 				}
 				catch (error) {
 					logger.error(`asset timeframe button failed (${interaction.customId})`, { error });
+				}
+				return;
+			}
+
+			if (interaction.customId.startsWith('watchlist_tf_') || interaction.customId.startsWith('watchlist_refresh_')) {
+				if (!rateLimiter(interaction.user.id, 'asset_tf', 8, 15000)) {
+					await interaction.reply({ content: 'Slow down — try again in a few seconds.', flags: MessageFlags.Ephemeral });
+					return;
+				}
+
+				const force = interaction.customId.startsWith('watchlist_refresh_');
+				const range = interaction.customId.slice((force ? 'watchlist_refresh_' : 'watchlist_tf_').length);
+
+				// Tickers live in the user's original message (this button is on the bot's
+				// reply), so re-parse the replied-to message — stateless, survives restarts.
+				const refId = interaction.message.reference?.messageId;
+				if (!refId || !interaction.guildId) return;
+
+				try {
+					await interaction.deferUpdate();
+					const original = await interaction.channel?.messages.fetch(refId).catch(() => null);
+					const payload = original
+						? await resolveWatchlistView(original.content, interaction.guildId, range, force)
+						: null;
+					if (!payload) {
+						await interaction.followUp({
+							content: 'Couldn\'t refresh that watchlist — the original message may be gone.',
+							flags: MessageFlags.Ephemeral,
+						});
+						return;
+					}
+					await interaction.editReply(payload);
+				}
+				catch (error) {
+					logger.error(`watchlist button failed (${interaction.customId})`, { error });
 				}
 				return;
 			}

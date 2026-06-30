@@ -1,72 +1,9 @@
-import { EmbedBuilder, AttachmentBuilder } from 'discord.js';
 import { MessageEvent } from '../../types';
 import logger from '../../utils/logger';
 import { getAssetEmbed, buildTimeframeRows } from '../../embeds/asset-embeds';
-import { renderWatchlistCard } from '../../embeds/asset-watchlist';
-import { getAssetPrice, getPrice, toAssetType, PriceData, AssetType } from '../../utils/priceApi';
-import { WatchedTickers } from '../../models/dbObjects';
-
-const TICKER_RE = /\$([a-zA-Z][a-zA-Z0-9._-]{0,9})\b/g;
-const MAX_RESULTS = 4;
-
-interface TickerRow {
-	symbol: string;
-	name: string | null;
-	type: string;
-}
-
-interface ResolvedTicker {
-	symbol: string;
-	name?: string;
-	type: AssetType;
-	tracked: boolean;
-}
-
-function levenshtein(a: string, b: string): number {
-	if (a === b) return 0;
-	if (!a.length) return b.length;
-	if (!b.length) return a.length;
-	const prev = new Array(b.length + 1);
-	const curr = new Array(b.length + 1);
-	for (let j = 0; j <= b.length; j++) prev[j] = j;
-	for (let i = 1; i <= a.length; i++) {
-		curr[0] = i;
-		for (let j = 1; j <= b.length; j++) {
-			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-			curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
-		}
-		for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
-	}
-	return prev[b.length];
-}
-
-function findTicker(query: string, tickers: TickerRow[]): TickerRow | null {
-	const q = query.toUpperCase();
-	const exact = tickers.find(t => t.symbol.toUpperCase() === q);
-	if (exact) return exact;
-
-	// Exact-only for ≤3 chars (SPY≠SPX), 1 for 4-5, 2 for 6+
-	if (q.length <= 3) return null;
-	const threshold = q.length <= 5 ? 1 : 2;
-	let best: { row: TickerRow; dist: number } | null = null;
-	for (const t of tickers) {
-		const symbol = t.symbol.toUpperCase();
-		// Symbol fuzzy-match requires equal length: length-changing edits
-		// (QQQM↔QQQ, GOOGL↔GOOG) are almost always distinct tickers, not typos.
-		if (symbol.length === q.length) {
-			const d = levenshtein(q, symbol);
-			if (d <= threshold && (!best || d < best.dist)) best = { row: t, dist: d };
-		}
-		if (t.name) {
-			for (const word of t.name.toUpperCase().split(/\s+/)) {
-				if (!word) continue;
-				const d = levenshtein(q, word);
-				if (d <= threshold && (!best || d < best.dist)) best = { row: t, dist: d };
-			}
-		}
-	}
-	return best?.row ?? null;
-}
+import { renderWatchlistCard, rowFromPrice } from '../../embeds/asset-watchlist';
+import { getAssetPrice, getPrice, PriceData } from '../../utils/priceApi';
+import { resolveTickers, buildWatchlistMessage, ResolvedTicker } from '../../utils/watchlist';
 
 async function fetchPrice(resolved: ResolvedTicker): Promise<PriceData | null> {
 	if (resolved.tracked) return getAssetPrice(resolved.symbol, resolved.type);
@@ -88,38 +25,7 @@ const messageEvent: MessageEvent = {
 			return;
 		}
 
-		const matches = [...content.matchAll(TICKER_RE)];
-		if (!matches.length) return;
-
-		// Dedup tokens, preserve order
-		const seen = new Set<string>();
-		const tokens: string[] = [];
-		for (const m of matches) {
-			const t = m[1].toUpperCase();
-			if (!seen.has(t)) {
-				seen.add(t);
-				tokens.push(t);
-			}
-		}
-		if (tokens.length > MAX_RESULTS) tokens.length = MAX_RESULTS;
-
-		const tickers = (await WatchedTickers.findAll({
-			where: { guild_id: message.guildId },
-		})) as unknown as TickerRow[];
-
-		// Resolve each token: tracked ticker first, then raw lookup
-		const resolved: ResolvedTicker[] = [];
-		const seenSymbols = new Set<string>();
-		for (const tok of tokens) {
-			const row = findTicker(tok, tickers);
-			const sym = row?.symbol ?? tok;
-			if (seenSymbols.has(sym)) continue;
-			seenSymbols.add(sym);
-			resolved.push(row
-				? { symbol: row.symbol, name: row.name ?? undefined, type: toAssetType(row.type), tracked: true }
-				: { symbol: tok, type: 'stock', tracked: false },
-			);
-		}
+		const resolved = await resolveTickers(content, message.guildId);
 		if (!resolved.length) return;
 
 		logger.info(`asset lookup: ${message.author.username} → [${resolved.map(r => `${r.symbol}${r.tracked ? '' : ' (untracked)'}`).join(', ')}]`);
@@ -138,29 +44,18 @@ const messageEvent: MessageEvent = {
 			);
 			if (!successful.length) return;
 
-			// 2+ tickers collapse into a single watchlist card so we don't flood
-			// the channel with 4 stacked 800x400 PNGs.
+			// 2+ tickers collapse into a single watchlist card (with timeframe buttons)
+			// so we don't flood the channel with stacked 800x400 PNGs.
 			if (successful.length >= 2) {
-				const watchlist = renderWatchlistCard(successful.map(r => ({
-					price: r.price,
-					type: r.resolved.type,
-					displayName: r.resolved.name,
-				})));
-				if (watchlist) {
-					const embed = new EmbedBuilder()
-						.setColor(0x2B2D31)
-						.setImage('attachment://watchlist.png')
-						.setFooter({ text: `${successful.length} tickers  •  yahoo` })
-						.setTimestamp();
-					const file = new AttachmentBuilder(watchlist, { name: 'watchlist.png' });
-					await message.reply({ embeds: [embed], files: [file] });
+				const card = renderWatchlistCard(successful.map(r => rowFromPrice(r.price, r.resolved.type, r.resolved.name)));
+				if (card) {
+					await message.reply(buildWatchlistMessage(card, successful.length, '1d'));
 					return;
 				}
 			}
 
 			const built = successful.map(r => getAssetEmbed(r.price, r.resolved.type, r.resolved.name));
-			// Single-ticker replies get timeframe buttons; multi-ticker collapses to a
-			// watchlist card above, where per-ticker timeframes would be ambiguous.
+			// Single-ticker replies get the per-ticker timeframe + candle buttons.
 			const components = successful.length === 1
 				? buildTimeframeRows(successful[0].price.symbol, successful[0].resolved.type, '1d')
 				: [];

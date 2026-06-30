@@ -225,6 +225,34 @@ export function buildTimeframeRows(displaySymbol: string, type: AssetType, activ
 	return rows;
 }
 
+// Timeframe + refresh buttons for the multi-ticker watchlist card. No symbols in
+// the customId (would blow the 100-char cap) — the handler re-parses the original
+// message text instead. No candle toggle: the rows are always sparklines.
+export function buildWatchlistButtons(active: string): ActionRowBuilder<ButtonBuilder>[] {
+	const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+	for (let i = 0; i < TIMEFRAME_ORDER.length; i += 5) {
+		const row = new ActionRowBuilder<ButtonBuilder>();
+		for (const range of TIMEFRAME_ORDER.slice(i, i + 5)) {
+			const isActive = range === active;
+			row.addComponents(
+				new ButtonBuilder()
+					.setCustomId(`watchlist_tf_${range}`)
+					.setLabel(RANGE_LABELS[range])
+					.setStyle(isActive ? ButtonStyle.Primary : ButtonStyle.Secondary)
+					.setDisabled(isActive),
+			);
+		}
+		rows.push(row);
+	}
+	rows[rows.length - 1].addComponents(
+		new ButtonBuilder()
+			.setCustomId(`watchlist_refresh_${active}`)
+			.setEmoji('🔄')
+			.setStyle(ButtonStyle.Secondary),
+	);
+	return rows;
+}
+
 function priceBar(low: number, high: number, current: number, barLen = 12): string {
 	const span = high - low;
 	const rawPos = span > 0 ? Math.round(((current - low) / span) * (barLen - 1)) : Math.floor(barLen / 2);

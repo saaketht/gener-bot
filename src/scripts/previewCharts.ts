@@ -3,6 +3,7 @@ config();
 import * as fs from 'fs';
 import * as path from 'path';
 import { renderAssetChart, renderHistoryChart } from '../embeds/asset-chart';
+import { renderWatchlistCard, rowFromPrice, rowFromHistory } from '../embeds/asset-watchlist';
 import { PriceData, HistoryData, HistoryPoint, IntradaySeries, AssetType } from '../utils/priceApi';
 
 // Offline preview harness. Renders the REAL chart renderers against synthetic
@@ -160,6 +161,12 @@ function main(): void {
 			if (type === 'stock') raw.push(dumpRaw(`stock ${range}`, hist));
 		}
 	}
+	// Watchlist (multi-ticker comparison) card at a live and a history window.
+	const dayRows = TYPES.map(t => rowFromPrice(buildIntraday(t), t));
+	write('preview-watchlist-1d.png', renderWatchlistCard(dayRows));
+	const yearRows = TYPES.map(t => rowFromHistory(buildHistory('1y', t), t));
+	write('preview-watchlist-1y.png', renderWatchlistCard(yearRows));
+
 	fs.writeFileSync(path.join(OUT, 'preview-rawdata.txt'), raw.join('\n'));
 	console.log(`done — raw data → ${path.join(OUT, 'preview-rawdata.txt')}`);
 }
