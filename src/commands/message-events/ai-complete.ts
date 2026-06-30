@@ -26,7 +26,7 @@ const grok = new OpenAI({
 
 const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
-const MODEL = 'grok-4.20-0309-non-reasoning';
+const MODEL = 'grok-4.3';
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const MAX_TOKENS = 512;
 const CLAUDE_MAX_TOKENS = 2048;
