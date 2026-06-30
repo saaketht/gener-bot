@@ -34,6 +34,7 @@ jobs:
             cd ~/gener-bot
             git fetch origin main
             git reset --hard origin/main
+            rm -rf node_modules
             npm ci
             rm -rf built
             npm run build
