@@ -31,6 +31,9 @@ declare global {
             LOG_LEVEL: string;
             PNL_CSV_PATH: string;
             CASH_FLOW_JSONL_PATH: string;
+            // Comma-separated Discord user IDs allowed to view trade data via the
+            // AI get_trades tool. Falls back to a user_profiles-row check when unset.
+            PNL_ALLOWED_USER_IDS?: string;
         }
     }
 }

@@ -5,6 +5,7 @@ import { users } from './Users';
 import { trackedFlights } from './TrackedFlights';
 import { userProfiles } from './UserProfiles';
 import { watchedTickers } from './WatchedTickers';
+import { channelHistory } from './ChannelHistory';
 
 import { join } from 'path';
 
@@ -22,11 +23,13 @@ const Users = users(sequelize);
 const TrackedFlights = trackedFlights(sequelize);
 const UserProfiles = userProfiles(sequelize);
 const WatchedTickers = watchedTickers(sequelize);
+const ChannelHistory = channelHistory(sequelize);
 // auto-create missing tables at startup. NOT { alter: true } — on SQLite that
 // rebuilds every table via a copy-to-backup dance on each boot, which corrupts
 // autoincrement PKs and crashes (see the tetris_scores incident). Add columns to
 // existing tables via explicit one-shot migrations below instead.
-sequelize.sync().then(() => {
+// dbReady resolves once tables exist — await it before querying at module load.
+const dbReady = sequelize.sync().then(() => {
 	// One-shot migration: collapse legacy 'etf' rows into 'stock' (idempotent).
 	WatchedTickers.update({ type: 'stock' }, { where: { type: 'etf' } });
 });
@@ -66,4 +69,6 @@ export {
 	TrackedFlights,
 	UserProfiles,
 	WatchedTickers,
+	ChannelHistory,
+	dbReady,
 };
