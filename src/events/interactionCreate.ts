@@ -6,7 +6,7 @@ import { DiscordClient } from '../types';
 import { rateLimiter } from '../utils/rateLimiter';
 import logger from '../utils/logger';
 import { parseTradesCSV } from '../embeds/pnl-embeds';
-import { resolveAssetView, buildTimeframeRows, parseTimeframeCustomId } from '../embeds/asset-embeds';
+import { resolveAssetView, buildTimeframeRows, parseTimeframeCustomId, parseWatchlistCustomId } from '../embeds/asset-embeds';
 import { resolveWatchlistView } from '../utils/watchlist';
 import { getUniqueTradingDays, getRecapEmbed } from '../embeds/recap-embeds';
 
@@ -86,14 +86,14 @@ const interactionCreateEvent = {
 				return;
 			}
 
-			if (interaction.customId.startsWith('watchlist_tf_') || interaction.customId.startsWith('watchlist_refresh_')) {
+			if (interaction.customId.startsWith('watchlist_')) {
+				const parsed = parseWatchlistCustomId(interaction.customId);
+				if (!parsed) return;
 				if (!rateLimiter(interaction.user.id, 'asset_tf', 8, 15000)) {
 					await interaction.reply({ content: 'Slow down — try again in a few seconds.', flags: MessageFlags.Ephemeral });
 					return;
 				}
-
-				const force = interaction.customId.startsWith('watchlist_refresh_');
-				const range = interaction.customId.slice((force ? 'watchlist_refresh_' : 'watchlist_tf_').length);
+				const { view, range, force } = parsed;
 
 				// Tickers live in the user's original message (this button is on the bot's
 				// reply), so re-parse the replied-to message — stateless, survives restarts.
@@ -104,7 +104,7 @@ const interactionCreateEvent = {
 					await interaction.deferUpdate();
 					const original = await interaction.channel?.messages.fetch(refId).catch(() => null);
 					const payload = original
-						? await resolveWatchlistView(original.content, interaction.guildId, range, force)
+						? await resolveWatchlistView(original.content, interaction.guildId, range, force, view)
 						: null;
 					if (!payload) {
 						await interaction.followUp({

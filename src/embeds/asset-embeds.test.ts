@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getAssetEmbed, getHistoryEmbed, buildTimeframeRows, parseTimeframeCustomId, resolveAssetView } from './asset-embeds';
+import { getAssetEmbed, getHistoryEmbed, buildTimeframeRows, parseTimeframeCustomId, resolveAssetView, buildWatchlistButtons, parseWatchlistCustomId } from './asset-embeds';
 import { PriceData, HistoryData, clearPriceCache, clearHistoryCache } from '../utils/priceApi';
 
 const stockUp: PriceData = {
@@ -385,5 +385,52 @@ describe('resolveAssetView', () => {
 		// force=true refetches
 		await resolveAssetView('SPY', 'stock', '1y', true);
 		expect(yahooChartCalls(fetchMock)).toBeGreaterThan(afterFirst);
+	});
+});
+
+describe('watchlist buttons', () => {
+	it('builds 8 timeframes + refresh + view-toggle across 2 rows of 5', () => {
+		const rows = buildWatchlistButtons('1d');
+		expect(rows.length).toBe(2);
+		const buttons = rows.flatMap(r => r.toJSON().components);
+		expect(buttons.length).toBe(10);
+		expect(rows[1].toJSON().components.length).toBe(5);
+	});
+
+	it('encodes the active view in timeframe + refresh customIds', () => {
+		const buttons = buildWatchlistButtons('3m', 'overlay').flatMap(r => r.toJSON().components) as any[];
+		const active = buttons.filter(b => b.custom_id?.startsWith('watchlist_tf_') && b.disabled);
+		expect(active[0].custom_id).toBe('watchlist_tf_overlay_3m');
+		const refresh = buttons.find(b => b.custom_id?.startsWith('watchlist_refresh_'));
+		expect(refresh.custom_id).toBe('watchlist_refresh_overlay_3m');
+	});
+
+	it('view toggle targets the opposite view with the matching emoji', () => {
+		const rowsView = (buildWatchlistButtons('1y', 'rows').flatMap(r => r.toJSON().components) as any[])
+			.find(b => b.custom_id?.startsWith('watchlist_view_'));
+		expect(rowsView.custom_id).toBe('watchlist_view_overlay_1y');
+		expect(rowsView.emoji?.name).toBe('📈');
+		const overlayView = (buildWatchlistButtons('1y', 'overlay').flatMap(r => r.toJSON().components) as any[])
+			.find(b => b.custom_id?.startsWith('watchlist_view_'));
+		expect(overlayView.custom_id).toBe('watchlist_view_rows_1y');
+		expect(overlayView.emoji?.name).toBe('📋');
+	});
+
+	it('round-trips encode → parse for tf, refresh and view', () => {
+		const enc = (pred: (c: string) => boolean) =>
+			(buildWatchlistButtons('3m', 'overlay').flatMap(r => r.toJSON().components) as any[])
+				.map(b => b.custom_id).find(pred)!;
+		expect(parseWatchlistCustomId(enc(c => c.startsWith('watchlist_tf_') && c.endsWith('_1y'))))
+			.toEqual({ view: 'overlay', range: '1y', force: false });
+		expect(parseWatchlistCustomId(enc(c => c.startsWith('watchlist_refresh_'))))
+			.toEqual({ view: 'overlay', range: '3m', force: true });
+		expect(parseWatchlistCustomId('watchlist_refresh_rows_1w')).toEqual({ view: 'rows', range: '1w', force: true });
+		expect(parseWatchlistCustomId('watchlist_view_overlay_ytd')).toEqual({ view: 'overlay', range: 'ytd', force: false });
+	});
+
+	it('returns null for non-watchlist or malformed customIds', () => {
+		expect(parseWatchlistCustomId('asset_tf_line_1y_stock_AAPL')).toBeNull();
+		expect(parseWatchlistCustomId('watchlist_tf_rows')).toBeNull();
+		expect(parseWatchlistCustomId('watchlist_view_rows_')).toBeNull();
 	});
 });

@@ -225,10 +225,29 @@ export function buildTimeframeRows(displaySymbol: string, type: AssetType, activ
 	return rows;
 }
 
-// Timeframe + refresh buttons for the multi-ticker watchlist card. No symbols in
-// the customId (would blow the 100-char cap) — the handler re-parses the original
-// message text instead. No candle toggle: the rows are always sparklines.
-export function buildWatchlistButtons(active: string): ActionRowBuilder<ButtonBuilder>[] {
+export type WatchlistView = 'rows' | 'overlay';
+
+// Decode a watchlist button customId. tf/refresh/view all encode <view>_<range>
+// (view = the mode to render); force is set only by refresh (cache bypass).
+export function parseWatchlistCustomId(customId: string): { view: WatchlistView; range: string; force: boolean } | null {
+	const isTf = customId.startsWith('watchlist_tf_');
+	const isRefresh = customId.startsWith('watchlist_refresh_');
+	const isView = customId.startsWith('watchlist_view_');
+	if (!isTf && !isRefresh && !isView) return null;
+	const prefix = isTf ? 'watchlist_tf_' : isRefresh ? 'watchlist_refresh_' : 'watchlist_view_';
+	const rest = customId.slice(prefix.length);
+	const i = rest.indexOf('_');
+	if (i < 0) return null;
+	const range = rest.slice(i + 1);
+	if (!range) return null;
+	return { view: rest.slice(0, i) === 'overlay' ? 'overlay' : 'rows', range, force: isRefresh };
+}
+
+// Timeframe + refresh + view-toggle buttons for the multi-ticker watchlist. No
+// symbols in the customId (would blow the 100-char cap) — the handler re-parses
+// the original message text instead. customIds carry the active view (rows card
+// vs normalized overlay) so it sticks across timeframe switches.
+export function buildWatchlistButtons(active: string, view: WatchlistView = 'rows'): ActionRowBuilder<ButtonBuilder>[] {
 	const rows: ActionRowBuilder<ButtonBuilder>[] = [];
 	for (let i = 0; i < TIMEFRAME_ORDER.length; i += 5) {
 		const row = new ActionRowBuilder<ButtonBuilder>();
@@ -236,7 +255,7 @@ export function buildWatchlistButtons(active: string): ActionRowBuilder<ButtonBu
 			const isActive = range === active;
 			row.addComponents(
 				new ButtonBuilder()
-					.setCustomId(`watchlist_tf_${range}`)
+					.setCustomId(`watchlist_tf_${view}_${range}`)
 					.setLabel(RANGE_LABELS[range])
 					.setStyle(isActive ? ButtonStyle.Primary : ButtonStyle.Secondary)
 					.setDisabled(isActive),
@@ -244,10 +263,19 @@ export function buildWatchlistButtons(active: string): ActionRowBuilder<ButtonBu
 		}
 		rows.push(row);
 	}
-	rows[rows.length - 1].addComponents(
+	const lastRow = rows[rows.length - 1];
+	lastRow.addComponents(
 		new ButtonBuilder()
-			.setCustomId(`watchlist_refresh_${active}`)
+			.setCustomId(`watchlist_refresh_${view}_${active}`)
 			.setEmoji('🔄')
+			.setStyle(ButtonStyle.Secondary),
+	);
+	// Toggle between the rows card and the normalized % overlay.
+	const targetView = view === 'overlay' ? 'rows' : 'overlay';
+	lastRow.addComponents(
+		new ButtonBuilder()
+			.setCustomId(`watchlist_view_${targetView}_${active}`)
+			.setEmoji(targetView === 'overlay' ? '📈' : '📋')
 			.setStyle(ButtonStyle.Secondary),
 	);
 	return rows;

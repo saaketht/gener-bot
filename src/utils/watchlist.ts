@@ -1,7 +1,7 @@
 import { EmbedBuilder, AttachmentBuilder } from 'discord.js';
 import { getAssetPrice, getHistory, toAssetType, AssetType, RANGE_LABELS } from './priceApi';
-import { renderWatchlistCard, rowFromPrice, rowFromHistory, WatchlistRow } from '../embeds/asset-watchlist';
-import { buildWatchlistButtons } from '../embeds/asset-embeds';
+import { renderWatchlistCard, renderComparisonOverlay, rowFromPrice, rowFromHistory, WatchlistRow } from '../embeds/asset-watchlist';
+import { buildWatchlistButtons, WatchlistView } from '../embeds/asset-embeds';
 import { WatchedTickers } from '../models/dbObjects';
 
 const TICKER_RE = /\$([a-zA-Z][a-zA-Z0-9._-]{0,9})\b/g;
@@ -110,7 +110,7 @@ export interface WatchlistMessage {
 // Assemble the reply/edit payload for a rendered watchlist card: embed + image
 // attachment + timeframe buttons. Shared so the initial render and the button
 // handler produce an identical message.
-export function buildWatchlistMessage(card: Buffer, count: number, range: string): WatchlistMessage {
+export function buildWatchlistMessage(card: Buffer, count: number, range: string, view: WatchlistView = 'rows'): WatchlistMessage {
 	const label = RANGE_LABELS[range] ?? range.toUpperCase();
 	const embed = new EmbedBuilder()
 		.setColor(0x2B2D31)
@@ -120,7 +120,7 @@ export function buildWatchlistMessage(card: Buffer, count: number, range: string
 	return {
 		embeds: [embed],
 		files: [new AttachmentBuilder(card, { name: 'watchlist.png' })],
-		components: buildWatchlistButtons(range),
+		components: buildWatchlistButtons(range, view),
 	};
 }
 
@@ -128,7 +128,7 @@ export function buildWatchlistMessage(card: Buffer, count: number, range: string
 // the full message payload. Symbols are re-derived from the original message
 // text, so this is stateless and survives restarts. force bypasses the caches.
 export async function resolveWatchlistView(
-	content: string, guildId: string, range: string, force = false,
+	content: string, guildId: string, range: string, force = false, view: WatchlistView = 'rows',
 ): Promise<WatchlistMessage | null> {
 	const resolved = await resolveTickers(content, guildId);
 	if (resolved.length < 2) return null;
@@ -145,6 +145,8 @@ export async function resolveWatchlistView(
 	const ok = rows.filter((x): x is WatchlistRow => x !== null);
 	if (ok.length < 2) return null;
 
-	const card = renderWatchlistCard(ok);
-	return card ? buildWatchlistMessage(card, ok.length, range) : null;
+	const card = view === 'overlay'
+		? renderComparisonOverlay(ok, RANGE_LABELS[range] ?? range.toUpperCase())
+		: renderWatchlistCard(ok);
+	return card ? buildWatchlistMessage(card, ok.length, range, view) : null;
 }

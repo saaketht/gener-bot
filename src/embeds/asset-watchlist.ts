@@ -123,6 +123,152 @@ export function renderWatchlistCard(rows: WatchlistRow[]): Buffer | null {
 	return canvas.toBuffer('image/png');
 }
 
+// Distinct per-ticker line colors for the overlay (each ticker gets its own hue
+// regardless of asset type, so lines are told apart by the legend).
+const OVERLAY_COLORS = ['#3B82F6', '#F59E0B', '#EC4899', '#34D399', '#A78BFA', '#22D3EE'];
+
+function fmtOverlayDate(tSec: number, spanDays: number): string {
+	const d = new Date(tSec * 1000);
+	if (spanDays <= 7) return d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
+	if (spanDays <= 370) return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+	return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+}
+
+// "Who outperformed" view: every ticker's series rebased to % change from the
+// window's start, drawn on one axis with a legend. All lines begin at 0%.
+export function renderComparisonOverlay(rows: WatchlistRow[], rangeLabel: string): Buffer | null {
+	const usable = rows.filter(r => r.series.length >= 2);
+	if (usable.length < 2) return null;
+
+	const H = 420;
+	const canvas = createCanvas(W, H);
+	const ctx = canvas.getContext('2d');
+	ctx.fillStyle = COLORS.bg;
+	ctx.fillRect(0, 0, W, H);
+
+	const lines = usable.map((r, i) => {
+		const base = r.series[0].price || 1;
+		return {
+			symbol: r.symbol,
+			color: OVERLAY_COLORS[i % OVERLAY_COLORS.length],
+			pct: r.changePct,
+			pts: r.series.map(p => ({ t: p.t, v: ((p.price - base) / base) * 100 })),
+		};
+	});
+
+	// Title + legend
+	ctx.fillStyle = COLORS.dim;
+	ctx.font = '13px Inter';
+	ctx.fillText(`NORMALIZED  ·  ${rangeLabel}`, 28, 30);
+	let lx = 28;
+	const legendY = 56;
+	for (const l of lines) {
+		ctx.fillStyle = l.color;
+		ctx.beginPath();
+		ctx.arc(lx + 5, legendY - 4, 5, 0, Math.PI * 2);
+		ctx.fill();
+		ctx.fillStyle = COLORS.text;
+		ctx.font = 'bold 14px Inter';
+		ctx.fillText(l.symbol, lx + 16, legendY);
+		const symW = ctx.measureText(l.symbol).width;
+		ctx.fillStyle = l.color;
+		ctx.font = '13px Inter';
+		const pctStr = `${l.pct >= 0 ? '+' : ''}${l.pct.toFixed(2)}%`;
+		ctx.fillText(pctStr, lx + 16 + symW + 8, legendY);
+		lx += 16 + symW + 8 + ctx.measureText(pctStr).width + 26;
+	}
+
+	// Plot panel
+	const chartX = 28, chartY = 78, chartW = W - 56, chartH = H - chartY - 34;
+	ctx.fillStyle = COLORS.panel;
+	ctx.fillRect(chartX, chartY, chartW, chartH);
+
+	let tMin = Infinity, tMax = -Infinity, vMin = 0, vMax = 0;
+	for (const l of lines) {
+		for (const p of l.pts) {
+			if (p.t < tMin) tMin = p.t;
+			if (p.t > tMax) tMax = p.t;
+			if (p.v < vMin) vMin = p.v;
+			if (p.v > vMax) vMax = p.v;
+		}
+	}
+	const tSpan = Math.max(1, tMax - tMin);
+	const vPad = (vMax - vMin) * 0.1 || 1;
+	vMin -= vPad; vMax += vPad;
+	const vSpan = Math.max(0.01, vMax - vMin);
+	const xS = (t: number) => chartX + ((t - tMin) / tSpan) * chartW;
+	const yS = (v: number) => chartY + chartH - ((v - vMin) / vSpan) * chartH;
+
+	// Gridlines
+	ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+	ctx.lineWidth = 1;
+	for (let g = 0; g <= 4; g++) {
+		const y = chartY + (chartH / 4) * g;
+		ctx.beginPath();
+		ctx.moveTo(chartX, y);
+		ctx.lineTo(chartX + chartW, y);
+		ctx.stroke();
+	}
+
+	// 0% baseline (all lines start here)
+	if (vMin < 0 && vMax > 0) {
+		ctx.strokeStyle = COLORS.prevLine;
+		ctx.setLineDash([4, 4]);
+		ctx.beginPath();
+		ctx.moveTo(chartX, yS(0));
+		ctx.lineTo(chartX + chartW, yS(0));
+		ctx.stroke();
+		ctx.setLineDash([]);
+	}
+
+	// Lines
+	for (const l of lines) {
+		ctx.strokeStyle = l.color;
+		ctx.lineWidth = 2;
+		ctx.beginPath();
+		l.pts.forEach((p, i) => {
+			const x = xS(p.t), y = yS(p.v);
+			if (i === 0) ctx.moveTo(x, y);
+			else ctx.lineTo(x, y);
+		});
+		ctx.stroke();
+		const end = l.pts[l.pts.length - 1];
+		ctx.fillStyle = l.color;
+		ctx.beginPath();
+		ctx.arc(xS(end.t), yS(end.v), 3.5, 0, Math.PI * 2);
+		ctx.fill();
+	}
+
+	// Y-axis % labels inside the right edge (on a backing so lines don't obscure)
+	ctx.font = '11px Inter';
+	ctx.textAlign = 'right';
+	for (let g = 0; g <= 4; g++) {
+		const y = chartY + (chartH / 4) * g;
+		const val = vMax - (vSpan / 4) * g;
+		const label = `${val >= 0 ? '+' : ''}${val.toFixed(0)}%`;
+		const lw = ctx.measureText(label).width;
+		ctx.fillStyle = COLORS.panel;
+		ctx.fillRect(chartX + chartW - lw - 8, y - 13, lw + 8, 14);
+		ctx.fillStyle = COLORS.dim;
+		ctx.fillText(label, chartX + chartW - 4, y - 3);
+	}
+	ctx.textAlign = 'left';
+
+	// X-axis dates
+	const spanDays = tSpan / 86400;
+	ctx.fillStyle = COLORS.dim;
+	ctx.font = '11px Inter';
+	for (let i = 0; i <= 5; i++) {
+		const t = tMin + (tSpan / 5) * i;
+		const label = fmtOverlayDate(t, spanDays);
+		const w = ctx.measureText(label).width;
+		const lxx = Math.max(chartX, Math.min(chartX + chartW - w, xS(t) - w / 2));
+		ctx.fillText(label, lxx, chartY + chartH + 18);
+	}
+
+	return canvas.toBuffer('image/png');
+}
+
 function drawRow(ctx: any, row: WatchlistRow, top: number, idx: number) {
 	const isUp = row.changePct >= 0;
 	const palette = TYPE_PALETTE[row.type][isUp ? 'up' : 'down'];
