@@ -6,7 +6,7 @@ import { Message, EmbedBuilder } from 'discord.js';
 import { MessageEvent } from '../../types';
 import { rateLimiter } from '../../utils/rateLimiter';
 import logger from '../../utils/logger';
-import { getAiResponseEmbed, getAiErrorEmbed } from '../../embeds/embeds';
+import { getAiErrorEmbed } from '../../embeds/embeds';
 import { COMMAND_MANIFEST } from '../../utils/commandManifest';
 import { fetchUserContext } from '../../utils/userContext';
 import { WatchedTickers, UserProfiles, ChannelHistory, dbReady } from '../../models/dbObjects';
@@ -1235,21 +1235,14 @@ const messageEvent: MessageEvent = {
 
 			if (abortController.signal.aborted) return;
 
+			// Strip any <msg> wrappers BEFORE the empty check — a model that "declines
+			// to respond" can emit tags-only output that is empty once stripped.
+			completion = completion.replace(/<msg\s+from="[^"]*">/gi, '').replace(/<\/msg>/gi, '').trim();
+
 			if (!completion) {
 				await message.reply('Unable to generate response.');
 				return;
 			}
-
-			completion = completion.replace(/<msg\s+from="[^"]*">/gi, '').replace(/<\/msg>/gi, '').trim();
-
-			const _embed = getAiResponseEmbed(message.author, {
-				model: routedModel,
-				prompt: userText,
-				response: completion,
-				inputTokens: 0,
-				outputTokens: 0,
-				success: true,
-			});
 
 			// Send actual response and cache message IDs
 			const sentIds: string[] = [];
@@ -1292,7 +1285,10 @@ const messageEvent: MessageEvent = {
 		}
 		catch (error) {
 			if (abortController.signal.aborted) return;
-			logger.error('AI API error:', error);
+			// Log the stack, not just the message — this catch swallows everything
+			// from provider SDKs to discord.js payload validation, and the message
+			// alone doesn't identify the throw site.
+			logger.error(`AI error: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
 			const errorEmbed = getAiErrorEmbed(
 				message.author,
 				'Sorry, something went wrong with the AI. Try again later.',
