@@ -6,6 +6,7 @@ import { trackedFlights } from './TrackedFlights';
 import { userProfiles } from './UserProfiles';
 import { watchedTickers } from './WatchedTickers';
 import { channelHistory } from './ChannelHistory';
+import { reminders } from './Reminders';
 
 import { join } from 'path';
 
@@ -24,14 +25,20 @@ const TrackedFlights = trackedFlights(sequelize);
 const UserProfiles = userProfiles(sequelize);
 const WatchedTickers = watchedTickers(sequelize);
 const ChannelHistory = channelHistory(sequelize);
+const Reminders = reminders(sequelize);
 // auto-create missing tables at startup. NOT { alter: true } — on SQLite that
 // rebuilds every table via a copy-to-backup dance on each boot, which corrupts
 // autoincrement PKs and crashes (see the tetris_scores incident). Add columns to
 // existing tables via explicit one-shot migrations below instead.
 // dbReady resolves once tables exist — await it before querying at module load.
-const dbReady = sequelize.sync().then(() => {
+const dbReady = sequelize.sync().then(async () => {
+	// SQLite returns SQLITE_BUSY immediately when another process holds a write
+	// lock (e.g. DB Browser with unwritten changes) — wait up to 5s instead.
+	await sequelize.query('PRAGMA busy_timeout = 5000').catch(() => undefined);
 	// One-shot migration: collapse legacy 'etf' rows into 'stock' (idempotent).
-	WatchedTickers.update({ type: 'stock' }, { where: { type: 'etf' } });
+	// catch: a locked DB must degrade to a warning, not an unhandled rejection.
+	await WatchedTickers.update({ type: 'stock' }, { where: { type: 'etf' } })
+		.catch(err => console.warn('etf→stock migration skipped:', err?.message ?? err));
 });
 
 UserItems.belongsTo(CurrencyShop, { foreignKey: 'item_id', as: 'item' });
@@ -70,5 +77,6 @@ export {
 	UserProfiles,
 	WatchedTickers,
 	ChannelHistory,
+	Reminders,
 	dbReady,
 };

@@ -1,6 +1,8 @@
 import { ActivityType } from 'discord.js';
 import { DiscordClient } from '../types';
 import { FlightTracker } from '../utils/flightTracker';
+import { startReminderLoop } from '../utils/reminders';
+import { startTrumpWatcher } from '../commands/message-events/trump';
 import logger from '../utils/logger';
 
 const readyEvent = {
@@ -21,6 +23,14 @@ const readyEvent = {
 		}
 		catch (error) {
 			logger.error('Failed to initialize flight tracker', { error });
+		}
+
+		try {
+			startReminderLoop(client);
+			startTrumpWatcher(client);
+		}
+		catch (error) {
+			logger.error('Failed to start background watchers', { error });
 		}
 	},
 };

@@ -34,6 +34,8 @@ declare global {
             // Comma-separated Discord user IDs allowed to view trade data via the
             // AI get_trades tool. Falls back to a user_profiles-row check when unset.
             PNL_ALLOWED_USER_IDS?: string;
+            // Channel ID for auto-posting new Truth Social posts. Unset = no watching.
+            TRUMP_WATCH_CHANNEL_ID?: string;
         }
     }
 }

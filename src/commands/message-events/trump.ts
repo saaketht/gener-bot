@@ -1,4 +1,4 @@
-import { EmbedBuilder } from 'discord.js';
+import { Client, EmbedBuilder } from 'discord.js';
 import { MessageEvent } from '../../types';
 import logger from '../../utils/logger';
 
@@ -18,13 +18,17 @@ interface TruthPost {
 
 let cache: { posts: TruthPost[]; fetchedAt: number; etag: string } | null = null;
 
-async function fetchPosts(): Promise<TruthPost[]> {
-	if (cache && Date.now() - cache.fetchedAt < CACHE_TTL) {
+// force skips the TTL check but still sends If-None-Match, so a fresh poll is
+// usually a near-free 304 revalidation.
+async function fetchPosts(force = false): Promise<TruthPost[]> {
+	if (!force && cache && Date.now() - cache.fetchedAt < CACHE_TTL) {
 		return cache.posts;
 	}
 	const headers: Record<string, string> = {};
 	if (cache?.etag) headers['If-None-Match'] = cache.etag;
-	const res = await fetch(ARCHIVE_URL, { headers });
+	// The archive is ~19MB (3.5MB gzipped) and can take a minute on a slow link —
+	// cap it so a hung download fails fast; ETag makes unchanged polls near-free 304s.
+	const res = await fetch(ARCHIVE_URL, { headers, signal: AbortSignal.timeout(90_000) });
 	if (res.status === 304 && cache) {
 		cache.fetchedAt = Date.now();
 		return cache.posts;
@@ -84,6 +88,55 @@ function buildEmbed(post: TruthPost, index: number): EmbedBuilder {
 	}
 
 	return embed;
+}
+
+const WATCH_POLL_MS = 10 * 60 * 1000;
+const WATCH_MAX_PER_POLL = 3;
+
+// Auto-post new Truth Social posts to the channel named by TRUMP_WATCH_CHANNEL_ID.
+// No env var → no polling. Seeds the last-seen ID on first poll without posting,
+// so restarts never replay old posts (downtime posts are skipped by design).
+export function startTrumpWatcher(client: Client) {
+	const channelId = process.env.TRUMP_WATCH_CHANNEL_ID;
+	if (!channelId) {
+		logger.info('trump watcher disabled (TRUMP_WATCH_CHANNEL_ID not set)');
+		return;
+	}
+
+	let lastSeenId: string | null = null;
+	const poll = async () => {
+		try {
+			const posts = await fetchPosts(true);
+			if (posts.length === 0) return;
+			if (lastSeenId === null) {
+				lastSeenId = posts[0].id;
+				return;
+			}
+
+			const fresh: { post: TruthPost; index: number }[] = [];
+			for (let i = 0; i < posts.length; i++) {
+				if (posts[i].id === lastSeenId) break;
+				fresh.push({ post: posts[i], index: i });
+			}
+			if (fresh.length === 0) return;
+			lastSeenId = posts[0].id;
+
+			const channel = await client.channels.fetch(channelId);
+			if (!channel?.isSendable()) return;
+			// oldest first, capped per poll
+			for (const { post, index } of fresh.slice(0, WATCH_MAX_PER_POLL).reverse()) {
+				await channel.send({ embeds: [buildEmbed(post, index)] });
+			}
+			logger.info(`trump watcher posted ${Math.min(fresh.length, WATCH_MAX_PER_POLL)} new post(s)`);
+		}
+		catch (err) {
+			logger.warn('trump watcher poll failed:', err);
+		}
+	};
+
+	poll();
+	setInterval(poll, WATCH_POLL_MS);
+	logger.info(`trump watcher enabled → channel ${channelId}, every ${WATCH_POLL_MS / 60000}min`);
 }
 
 const messageEvent: MessageEvent = {

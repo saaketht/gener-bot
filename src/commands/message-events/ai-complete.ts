@@ -16,6 +16,7 @@ import { parseTradesCSV, normalizeDate, getTodayDateStr, getPnlEmbed } from '../
 import { getUniqueTradingDays, getDaySummary, getRecapEmbed } from '../../embeds/recap-embeds';
 import { getAssetEmbed, getHistoryEmbed, buildTimeframeRows } from '../../embeds/asset-embeds';
 import { searchImage } from '../../utils/imageSearch';
+import { createReminder } from '../../utils/reminders';
 import { fetchFlightStatus } from '../../utils/flightApi';
 import { getFlightTrackingEmbed } from '../../embeds/flight-embeds';
 import { isToolLoopActive, getToolUses } from './toolLoop';
@@ -113,25 +114,35 @@ const FINANCIAL_PREFIX = FINANCIAL_SYSTEM_PROMPT
 	+ '\n\nBot capabilities (mention casually when relevant, don\'t list them all):\n' + COMMAND_MANIFEST
 	+ CONV_FORMAT;
 
+// Current time for the model (reminder math, "today" questions). Volatile —
+// must never be interpolated into the cached FINANCIAL_PREFIX.
+function nowLine(): string {
+	const et = new Intl.DateTimeFormat('en-US', {
+		timeZone: 'America/New_York', dateStyle: 'full', timeStyle: 'short',
+	}).format(new Date());
+	return `\n\nCurrent time: ${et} (US Eastern)`;
+}
+
 function buildSystemPrompt(userContextStr: string): string {
 	return SYSTEM_PROMPT
 		+ '\n\nBot capabilities (mention casually when relevant, don\'t list them all):\n' + COMMAND_MANIFEST
 		+ CONV_FORMAT
-		+ '\n\nUser data: ' + userContextStr;
+		+ '\n\nUser data: ' + userContextStr
+		+ nowLine();
 }
 
 // String form — used by the Grok financial fallback (Responses API takes a string).
 function buildFinancialSystemPrompt(userContextStr: string): string {
-	return FINANCIAL_PREFIX + '\n\nUser data: ' + userContextStr;
+	return FINANCIAL_PREFIX + '\n\nUser data: ' + userContextStr + nowLine();
 }
 
 // Block form for Claude: cache_control on the stable prefix caches tools + prefix
-// across tool-loop rounds and across messages (5min TTL). The volatile user-data
-// block sits after the breakpoint so it never invalidates the cache.
+// across tool-loop rounds and across messages (5min TTL). Volatile content (user
+// data, current time) sits in the second block after the breakpoint.
 function buildFinancialSystemBlocks(userContextStr: string): Anthropic.TextBlockParam[] {
 	return [
 		{ type: 'text', text: FINANCIAL_PREFIX, cache_control: { type: 'ephemeral' } },
-		{ type: 'text', text: 'User data: ' + userContextStr },
+		{ type: 'text', text: 'User data: ' + userContextStr + nowLine() },
 	];
 }
 
@@ -384,6 +395,18 @@ const SHARED_TOOLS: ToolDef[] = [
 				user: { type: 'string', description: 'Discord mention like <@123456789> or raw user ID' },
 			},
 			required: ['user'],
+		},
+	},
+	{
+		name: 'set_reminder',
+		description: 'Set a reminder that pings the requester in this channel after a delay. Call this when someone asks to be reminded of something. Convert their request to minutes from now using the current time in your context (e.g. "in 2 hours" → 120).',
+		parameters: {
+			type: 'object',
+			properties: {
+				message: { type: 'string', description: 'What to remind them about' },
+				minutes: { type: 'number', description: 'Delay in minutes from now (1 to 43200 = 30 days)' },
+			},
+			required: ['message', 'minutes'],
 		},
 	},
 ];
@@ -765,6 +788,21 @@ const toolHandlers: Record<string, ToolHandler> = {
 		const profile: any = await UserProfiles.findOne({ where: { user_id: targetId } });
 		if (!profile?.notes) return JSON.stringify({ found: false, message: 'no saved notes for that user' });
 		return JSON.stringify({ found: true, user_id: targetId, username: profile.username, notes: profile.notes });
+	},
+
+	async set_reminder(input, ctx) {
+		const minutes = input.minutes;
+		const msg = input.message;
+		if (!msg || typeof msg !== 'string') return JSON.stringify({ error: 'missing or invalid message' });
+		if (typeof minutes !== 'number' || !isFinite(minutes)) return JSON.stringify({ error: 'missing or invalid minutes' });
+		const result = await createReminder(ctx.message.author.id, ctx.message.channelId, msg, Math.round(minutes * 60 * 1000));
+		if (!result.ok) return JSON.stringify({ error: result.error });
+		const unix = Math.floor(result.dueAt.getTime() / 1000);
+		return JSON.stringify({
+			set: true,
+			due_at: result.dueAt.toISOString(),
+			discord_timestamp: `<t:${unix}:R>`,
+		});
 	},
 
 };
