@@ -399,12 +399,13 @@ const SHARED_TOOLS: ToolDef[] = [
 	},
 	{
 		name: 'set_reminder',
-		description: 'Set a reminder that pings the requester in this channel after a delay. Call this when someone asks to be reminded of something. Convert their request to minutes from now using the current time in your context (e.g. "in 2 hours" → 120).',
+		description: 'Set a reminder that pings a user in this channel after a delay. Call this when someone asks to be reminded of something — themselves by default, or another user ("remind @user to ..."). Convert the timing to minutes from now using the current time in your context (e.g. "in 2 hours" → 120, "in 30 seconds" → 0.5).',
 		parameters: {
 			type: 'object',
 			properties: {
 				message: { type: 'string', description: 'What to remind them about' },
-				minutes: { type: 'number', description: 'Delay in minutes from now (1 to 43200 = 30 days)' },
+				minutes: { type: 'number', description: 'Delay in minutes from now. Fractions allowed — minimum 0.17 (10 seconds), maximum 43200 (30 days).' },
+				user: { type: 'string', description: 'Who to ping: a Discord mention like <@123456789> or raw user ID. Omit to remind the requester.' },
 			},
 			required: ['message', 'minutes'],
 		},
@@ -795,11 +796,15 @@ const toolHandlers: Record<string, ToolHandler> = {
 		const msg = input.message;
 		if (!msg || typeof msg !== 'string') return JSON.stringify({ error: 'missing or invalid message' });
 		if (typeof minutes !== 'number' || !isFinite(minutes)) return JSON.stringify({ error: 'missing or invalid minutes' });
-		const result = await createReminder(ctx.message.author.id, ctx.message.channelId, msg, Math.round(minutes * 60 * 1000));
+		// Optional target — the pinged user (and whose pending cap applies); defaults to the requester.
+		const targetId = parseUserId(input.user, ctx.message.author.id);
+		if (!targetId) return JSON.stringify({ error: 'invalid user — pass a mention like <@123456789> or a raw ID' });
+		const result = await createReminder(targetId, ctx.message.channelId, msg, Math.round(minutes * 60 * 1000));
 		if (!result.ok) return JSON.stringify({ error: result.error });
 		const unix = Math.floor(result.dueAt.getTime() / 1000);
 		return JSON.stringify({
 			set: true,
+			for_user: targetId,
 			due_at: result.dueAt.toISOString(),
 			discord_timestamp: `<t:${unix}:R>`,
 		});

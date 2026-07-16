@@ -18,10 +18,9 @@ interface TruthPost {
 
 let cache: { posts: TruthPost[]; fetchedAt: number; etag: string } | null = null;
 
-// force skips the TTL check but still sends If-None-Match, so a fresh poll is
-// usually a near-free 304 revalidation.
-async function fetchPosts(force = false): Promise<TruthPost[]> {
-	if (!force && cache && Date.now() - cache.fetchedAt < CACHE_TTL) {
+// Full-archive fetch — used by the `trump [n]` command for deep browsing.
+async function fetchPosts(): Promise<TruthPost[]> {
+	if (cache && Date.now() - cache.fetchedAt < CACHE_TTL) {
 		return cache.posts;
 	}
 	const headers: Record<string, string> = {};
@@ -92,6 +91,25 @@ function buildEmbed(post: TruthPost, index: number): EmbedBuilder {
 
 const WATCH_POLL_MS = 10 * 60 * 1000;
 const WATCH_MAX_PER_POLL = 3;
+const WATCH_PARTIAL_BYTES = 64 * 1024;
+let watchEtag = '';
+
+// Watcher fetch: the archive is ~19MB but newest-first and the CDN honors Range
+// requests, so pull only the first 64KB (~20 posts) and cut at the last complete
+// top-level object. Returns null when the archive is unchanged (ETag 304).
+// If the server ever ignores the Range and sends 200, the same parse still works.
+async function fetchLatestPosts(): Promise<TruthPost[] | null> {
+	const headers: Record<string, string> = { Range: `bytes=0-${WATCH_PARTIAL_BYTES - 1}` };
+	if (watchEtag) headers['If-None-Match'] = watchEtag;
+	const res = await fetch(ARCHIVE_URL, { headers, signal: AbortSignal.timeout(30_000) });
+	if (res.status === 304) return null;
+	if (!res.ok) throw new Error(`Truth Social archive returned ${res.status}`);
+	watchEtag = res.headers.get('etag') ?? '';
+	const text = await res.text();
+	const cut = text.lastIndexOf('\n  }');
+	if (cut < 0) throw new Error('no complete post in partial archive response');
+	return JSON.parse(text.slice(0, cut + 4) + '\n]');
+}
 
 // Auto-post new Truth Social posts to the channel named by TRUMP_WATCH_CHANNEL_ID.
 // No env var → no polling. Seeds the last-seen ID on first poll without posting,
@@ -106,8 +124,8 @@ export function startTrumpWatcher(client: Client) {
 	let lastSeenId: string | null = null;
 	const poll = async () => {
 		try {
-			const posts = await fetchPosts(true);
-			if (posts.length === 0) return;
+			const posts = await fetchLatestPosts();
+			if (!posts || posts.length === 0) return;
 			if (lastSeenId === null) {
 				lastSeenId = posts[0].id;
 				return;
