@@ -11,13 +11,15 @@ Slash commands:
 - /user — view your Discord profile info
 - /avatar — display a user's avatar
 - /flight track|list|remove — track real-time flights
-- /ticker add|remove|list — manage tracked financial instruments
+- /ticker add|remove|list — (deprecated — use watchlist commands)
 - /ping — check bot latency
 - /server — view server info
 
 Message commands (type these in chat):
 - "ai <message>" — talk to me (can also pull up PNL, prices, charts, flights, weather, and images, set reminders, and remember things about users)
 - "remindme <duration> <message>" — ping you after a delay (e.g. remindme 1h30m check oven)
+- "watchlist" — your watchlist (or the guild's), paginated price card
+- "watchlist add|remove <sym> [guild]" — curate your list, or the shared guild list
 - "ai-image <prompt>" — generate an image
 - "ai-video <prompt>" — generate a video
 - "weather <city>" — get weather
@@ -26,7 +28,7 @@ Message commands (type these in chat):
 - "recap" — 5-day trading recap
 - "recap all" — all-time P/L overview
 - "warframe <query>" — Warframe game data
-- "$<ticker>" — live price for any tracked asset (stocks, crypto, commodities)
+- "$<ticker>" — live price card for any symbol (stocks/ETFs, common crypto, commodities)
 - "food <type>" — food/recipe lookup
 - "imagesearch <query>" — image search
 `.trim();

@@ -2,13 +2,14 @@ import { MessageEvent } from '../../types';
 import logger from '../../utils/logger';
 import { getAssetEmbed, buildTimeframeRows } from '../../embeds/asset-embeds';
 import { renderWatchlistCard, rowFromPrice } from '../../embeds/asset-watchlist';
-import { getAssetPrice, getPrice, PriceData } from '../../utils/priceApi';
+import { getAssetPrice, PriceData } from '../../utils/priceApi';
 import { resolveTickers, buildWatchlistMessage, ResolvedTicker } from '../../utils/watchlist';
+import { recordLookup } from '../../utils/lookupStats';
 
+// Type-aware fetch for tracked AND untracked symbols — resolveTickers infers
+// crypto/commodity statically, so `$doge` normalizes to DOGE-USD untracked.
 async function fetchPrice(resolved: ResolvedTicker): Promise<PriceData | null> {
-	if (resolved.tracked) return getAssetPrice(resolved.symbol, resolved.type);
-	// Untracked: try raw symbol (works for any stock/ETF on major exchanges)
-	return getPrice(resolved.symbol);
+	return getAssetPrice(resolved.symbol, resolved.type);
 }
 
 const messageEvent: MessageEvent = {
@@ -29,6 +30,7 @@ const messageEvent: MessageEvent = {
 		if (!resolved.length) return;
 
 		logger.info(`asset lookup: ${message.author.username} → [${resolved.map(r => `${r.symbol}${r.tracked ? '' : ' (untracked)'}`).join(', ')}]`);
+		for (const r of resolved) recordLookup(message.author.id, r.symbol);
 
 		try {
 			if ('sendTyping' in message.channel) await message.channel.sendTyping();

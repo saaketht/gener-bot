@@ -7,6 +7,8 @@ import { userProfiles } from './UserProfiles';
 import { watchedTickers } from './WatchedTickers';
 import { channelHistory } from './ChannelHistory';
 import { reminders } from './Reminders';
+import { watchlistItems } from './WatchlistItems';
+import { lookupStats } from './LookupStats';
 
 import { join } from 'path';
 
@@ -26,6 +28,8 @@ const UserProfiles = userProfiles(sequelize);
 const WatchedTickers = watchedTickers(sequelize);
 const ChannelHistory = channelHistory(sequelize);
 const Reminders = reminders(sequelize);
+const WatchlistItems = watchlistItems(sequelize);
+const LookupStats = lookupStats(sequelize);
 // auto-create missing tables at startup. NOT { alter: true } — on SQLite that
 // rebuilds every table via a copy-to-backup dance on each boot, which corrupts
 // autoincrement PKs and crashes (see the tetris_scores incident). Add columns to
@@ -39,6 +43,22 @@ const dbReady = sequelize.sync().then(async () => {
 	// catch: a locked DB must degrade to a warning, not an unhandled rejection.
 	await WatchedTickers.update({ type: 'stock' }, { where: { type: 'etf' } })
 		.catch(err => console.warn('etf→stock migration skipped:', err?.message ?? err));
+
+	// One-shot seed: when the watchlist table is brand new, seed the guild list
+	// from observed lookup frequency (top 8 as of Jul 2026 log analysis).
+	try {
+		const guildId = process.env.guildId;
+		if (guildId && await WatchlistItems.count() === 0) {
+			const SEED = ['SPCX', 'VOO', 'SPY', 'TXN', 'TTWO', 'NBIS', 'NVDA', 'QQQ'];
+			await WatchlistItems.bulkCreate(SEED.map(symbol => ({
+				guild_id: guildId, owner_id: '', symbol, type: 'stock', added_by: 'seed',
+			})));
+			console.log(`seeded guild watchlist with ${SEED.length} tickers`);
+		}
+	}
+	catch (err: any) {
+		console.warn('watchlist seed skipped:', err?.message ?? err);
+	}
 });
 
 UserItems.belongsTo(CurrencyShop, { foreignKey: 'item_id', as: 'item' });
@@ -78,5 +98,7 @@ export {
 	WatchedTickers,
 	ChannelHistory,
 	Reminders,
+	WatchlistItems,
+	LookupStats,
 	dbReady,
 };

@@ -386,6 +386,25 @@ export function normalizeSymbol(symbol: string, type: AssetType): string {
 	return up;
 }
 
+// Cryptos recognized without any DB tracking. Only symbols that do NOT collide
+// with a real US stock ticker belong here (LINK, VET, ATOM, APT, OP, ARB, UNI
+// are all listed equities — a collision would shadow the stock, so leave them
+// out and let those quote as stocks).
+const CRYPTO_SYMBOLS = new Set([
+	'BTC', 'ETH', 'SOL', 'DOGE', 'ADA', 'XRP', 'BNB', 'LTC', 'XMR', 'HNT',
+	'SHIB', 'PEPE', 'BONK', 'WIF', 'AVAX', 'DOT', 'TRX', 'TON', 'AAVE', 'FIL',
+	'ICP', 'ETC', 'BCH', 'XLM', 'ALGO', 'NEAR', 'SUI', 'INJ', 'JUP', 'RENDER',
+]);
+
+// Static type inference — replaces per-guild type tracking in the DB. Crypto and
+// commodity symbols come from the built-in maps; everything else is a stock/ETF.
+export function inferAssetType(symbol: string): AssetType {
+	const up = symbol.toUpperCase();
+	if (CRYPTO_SYMBOLS.has(up)) return 'crypto';
+	if (COMMODITY_SYMBOLS[up]) return 'commodity';
+	return 'stock';
+}
+
 export async function getAssetPrice(symbol: string, type: AssetType, force = false): Promise<PriceData | null> {
 	const normalized = normalizeSymbol(symbol, type);
 	const data = await getPrice(normalized, force);

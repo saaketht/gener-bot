@@ -7,7 +7,7 @@ import { rateLimiter } from '../utils/rateLimiter';
 import logger from '../utils/logger';
 import { parseTradesCSV } from '../embeds/pnl-embeds';
 import { resolveAssetView, buildTimeframeRows, parseTimeframeCustomId, parseWatchlistCustomId } from '../embeds/asset-embeds';
-import { resolveWatchlistView } from '../utils/watchlist';
+import { resolveWatchlistView, resolveDbWatchlistView, parseDbWatchlistCustomId } from '../utils/watchlist';
 import { getUniqueTradingDays, getRecapEmbed } from '../embeds/recap-embeds';
 
 const interactionCreateEvent = {
@@ -82,6 +82,36 @@ const interactionCreateEvent = {
 				}
 				catch (error) {
 					logger.error(`asset timeframe button failed (${interaction.customId})`, { error });
+				}
+				return;
+			}
+
+			// DB-backed watchlist cards (guild/personal lists) — the list lives in
+			// SQLite and the customId carries view/range/page/owner, so these stay
+			// functional on old messages across restarts.
+			if (interaction.customId.startsWith('wldb_')) {
+				const parsed = parseDbWatchlistCustomId(interaction.customId);
+				if (!parsed || !interaction.guildId) return;
+				if (!rateLimiter(interaction.user.id, 'asset_tf', 8, 15000)) {
+					await interaction.reply({ content: 'Slow down — try again in a few seconds.', flags: MessageFlags.Ephemeral });
+					return;
+				}
+				try {
+					await interaction.deferUpdate();
+					const payload = await resolveDbWatchlistView(
+						interaction.guildId, parsed.ownerKey, parsed.range, parsed.page, parsed.force, parsed.view,
+					);
+					if (!payload) {
+						await interaction.followUp({
+							content: 'Couldn\'t refresh that watchlist — it may be empty now.',
+							flags: MessageFlags.Ephemeral,
+						});
+						return;
+					}
+					await interaction.editReply(payload);
+				}
+				catch (error) {
+					logger.error(`db watchlist button failed (${interaction.customId})`, { error });
 				}
 				return;
 			}

@@ -9,8 +9,10 @@ import logger from '../../utils/logger';
 import { getAiErrorEmbed } from '../../embeds/embeds';
 import { COMMAND_MANIFEST } from '../../utils/commandManifest';
 import { fetchUserContext } from '../../utils/userContext';
-import { WatchedTickers, UserProfiles, ChannelHistory, dbReady } from '../../models/dbObjects';
-import { getAssetPrice, getPrice, getHistory, toAssetType } from '../../utils/priceApi';
+import { WatchlistItems, UserProfiles, ChannelHistory, dbReady } from '../../models/dbObjects';
+import { getAssetPrice, getHistory, inferAssetType, AssetType } from '../../utils/priceApi';
+import { getListItems, resolveOwnerList, resolveDbWatchlistView, addWatchlistItem, removeWatchlistItem } from '../../utils/watchlist';
+import { recordLookup } from '../../utils/lookupStats';
 import { readTradesCSV } from '../../utils/tradeData';
 import { parseTradesCSV, normalizeDate, getTodayDateStr, getPnlEmbed } from '../../embeds/pnl-embeds';
 import { getUniqueTradingDays, getDaySummary, getRecapEmbed } from '../../embeds/recap-embeds';
@@ -292,7 +294,7 @@ interface ToolDef {
 const SHARED_TOOLS: ToolDef[] = [
 	{
 		name: 'lookup_ticker',
-		description: 'Look up whether a symbol is a tracked financial instrument (stock, crypto, or commodity). Call this BEFORE discussing any financial instrument to verify it exists.',
+		description: 'Check how a symbol will be treated (stock/crypto/commodity), its display name, and whether it is on the guild watchlist. Any valid symbol works with get_price/get_chart regardless of watchlist membership.',
 		parameters: {
 			type: 'object',
 			properties: { symbol: { type: 'string', description: 'Ticker symbol, e.g. AAPL, BTC, SPY' } },
@@ -398,6 +400,30 @@ const SHARED_TOOLS: ToolDef[] = [
 		},
 	},
 	{
+		name: 'get_watchlist',
+		description: 'Show a watchlist card — a multi-ticker price grid with timeframe buttons. Call this when someone asks to see the watchlist or how the watchlist is doing. scope=mine shows the requester\'s personal list (falls back to the guild list when empty); scope=guild shows the shared list.',
+		parameters: {
+			type: 'object',
+			properties: {
+				scope: { type: 'string', enum: ['mine', 'guild'], description: 'Which list. Default mine (falls back to guild when the personal list is empty).' },
+				range: { type: 'string', enum: ['1d', '1w', '1m', '3m', 'ytd', '1y', '5y', 'all'], description: 'Timeframe. Default 1d.' },
+			},
+		},
+	},
+	{
+		name: 'manage_watchlist',
+		description: 'Add or remove a ticker on a watchlist. Call this when someone asks to add/remove/track/untrack a symbol. scope=mine edits the requester\'s personal list (default); scope=guild edits the shared guild list — open to everyone for now.',
+		parameters: {
+			type: 'object',
+			properties: {
+				action: { type: 'string', enum: ['add', 'remove'], description: 'What to do' },
+				symbol: { type: 'string', description: 'Ticker symbol, e.g. AAPL, BTC' },
+				scope: { type: 'string', enum: ['mine', 'guild'], description: 'Which list to edit. Default mine.' },
+			},
+			required: ['action', 'symbol'],
+		},
+	},
+	{
 		name: 'set_reminder',
 		description: 'Set a reminder that pings a user in this channel after a delay. Call this when someone asks to be reminded of something — themselves by default, or another user ("remind @user to ..."). Convert the timing to minutes from now using the current time in your context (e.g. "in 2 hours" → 120, "in 30 seconds" → 0.5).',
 		parameters: {
@@ -438,7 +464,8 @@ const CLAUDE_TOOLS: Anthropic.Messages.ToolUnion[] = [
 
 // Cache ticker lookups within a single tool-use session to avoid redundant DB hits
 // (lookup_ticker runs first, get_price re-uses the same row)
-type TickerCache = Map<string, { symbol: string; name: string | null; type: string } | null>;
+type TickerInfo = { symbol: string; name: string | null; type: AssetType; on_watchlist: boolean };
+type TickerCache = Map<string, TickerInfo>;
 
 interface ToolContext {
 	guildId: string | null;
@@ -447,17 +474,16 @@ interface ToolContext {
 	sentEmbedIds: string[];
 }
 
-async function resolveTicker(symbol: string, guildId: string | null, cache: TickerCache): Promise<{ symbol: string; name: string | null; type: string } | null> {
+// Type comes from static inference (any symbol works); the guild watchlist only
+// contributes a display name and membership flag.
+async function resolveTicker(symbol: string, guildId: string | null, cache: TickerCache): Promise<TickerInfo> {
 	const key = symbol.toUpperCase();
-	if (cache.has(key)) return cache.get(key)!;
-	if (!guildId) {
-		cache.set(key, null);
-		return null;
-	}
-	const ticker: any = await WatchedTickers.findOne({
-		where: { symbol: key, guild_id: guildId },
-	});
-	const result = ticker ? { symbol: ticker.symbol, name: ticker.name, type: ticker.type } : null;
+	const cached = cache.get(key);
+	if (cached) return cached;
+	const row: any = guildId
+		? await WatchlistItems.findOne({ where: { guild_id: guildId, owner_id: '', symbol: key } })
+		: null;
+	const result: TickerInfo = { symbol: key, name: row?.name ?? null, type: inferAssetType(key), on_watchlist: !!row };
 	cache.set(key, result);
 	return result;
 }
@@ -490,8 +516,7 @@ const toolHandlers: Record<string, ToolHandler> = {
 		const sym = input.symbol;
 		if (!sym || typeof sym !== 'string') return JSON.stringify({ error: 'missing or invalid symbol' });
 		const ticker = await resolveTicker(sym, ctx.guildId, ctx.tickerCache);
-		if (ticker) return JSON.stringify({ found: true, ...ticker });
-		return JSON.stringify({ found: false, message: `${sym.toUpperCase()} is not a known tracked instrument` });
+		return JSON.stringify(ticker);
 	},
 
 	async get_price(input, ctx) {
@@ -499,10 +524,9 @@ const toolHandlers: Record<string, ToolHandler> = {
 		if (!sym || typeof sym !== 'string') return JSON.stringify({ error: 'missing or invalid symbol' });
 		const showEmbed = input.show_embed === true;
 		const ticker = await resolveTicker(sym, ctx.guildId, ctx.tickerCache);
-		const type = ticker ? toAssetType(ticker.type) : 'stock' as const;
-		const priceData = ticker
-			? await getAssetPrice(sym.toUpperCase(), type)
-			: await getPrice(sym.toUpperCase());
+		const type = ticker.type;
+		recordLookup(ctx.message.author.id, sym);
+		const priceData = await getAssetPrice(sym.toUpperCase(), type);
 		if (!priceData) return JSON.stringify({ found: false, message: `no price data available for ${sym.toUpperCase()}` });
 		if (showEmbed && ctx.message.channel.isSendable()) {
 			const { embed, files } = getAssetEmbed(priceData, type, ticker?.name ?? undefined);
@@ -513,7 +537,7 @@ const toolHandlers: Record<string, ToolHandler> = {
 		// floats the LLM can't meaningfully reason over, and it costs ~2k tokens
 		// per call.
 		const { intraday: _intraday, ...modelView } = priceData;
-		return JSON.stringify({ ...modelView, tracked: !!ticker, embed_sent: showEmbed });
+		return JSON.stringify({ ...modelView, on_watchlist: ticker.on_watchlist, embed_sent: showEmbed });
 	},
 
 	async get_trades(input, ctx) {
@@ -669,8 +693,9 @@ const toolHandlers: Record<string, ToolHandler> = {
 		const range = CHART_RANGES.has(input.range) ? input.range : '1m';
 		const showEmbed = input.show_embed !== false;
 		const ticker = await resolveTicker(sym, ctx.guildId, ctx.tickerCache);
-		const type = ticker ? toAssetType(ticker.type) : 'stock' as const;
+		const type = ticker.type;
 		const symbol = sym.toUpperCase();
+		recordLookup(ctx.message.author.id, symbol);
 
 		if (range === '1d') {
 			const price = await getAssetPrice(symbol, type);
@@ -789,6 +814,48 @@ const toolHandlers: Record<string, ToolHandler> = {
 		const profile: any = await UserProfiles.findOne({ where: { user_id: targetId } });
 		if (!profile?.notes) return JSON.stringify({ found: false, message: 'no saved notes for that user' });
 		return JSON.stringify({ found: true, user_id: targetId, username: profile.username, notes: profile.notes });
+	},
+
+	async get_watchlist(input, ctx) {
+		if (!ctx.guildId) return JSON.stringify({ error: 'watchlists only work in a server' });
+		const range = CHART_RANGES.has(input.range) ? input.range : '1d';
+		const ownerKey = input.scope === 'guild'
+			? ''
+			: (await resolveOwnerList(ctx.guildId, ctx.message.author.id)).ownerKey;
+		const items = await getListItems(ctx.guildId, ownerKey);
+		if (items.length === 0) return JSON.stringify({ found: false, message: 'that watchlist is empty' });
+
+		let embedSent = false;
+		if (ctx.message.channel.isSendable()) {
+			const payload = await resolveDbWatchlistView(ctx.guildId, ownerKey, range, 0);
+			if (payload) {
+				const sent = await ctx.message.channel.send(payload);
+				ctx.sentEmbedIds.push(sent.id);
+				embedSent = true;
+			}
+		}
+		return JSON.stringify({
+			scope: ownerKey === '' ? 'guild' : 'personal',
+			count: items.length,
+			symbols: items.map(i => i.symbol),
+			embed_sent: embedSent,
+		});
+	},
+
+	async manage_watchlist(input, ctx) {
+		if (!ctx.guildId) return JSON.stringify({ error: 'watchlists only work in a server' });
+		const action = input.action;
+		const symbol = input.symbol;
+		if (action !== 'add' && action !== 'remove') return JSON.stringify({ error: 'action must be add or remove' });
+		if (!symbol || typeof symbol !== 'string') return JSON.stringify({ error: 'missing or invalid symbol' });
+		// Guild-list edits are open to everyone for now — see addWatchlistItem for
+		// the single place to gate this if it ever needs to be.
+		const ownerKey = input.scope === 'guild' ? '' : ctx.message.author.id;
+		const result = action === 'add'
+			? await addWatchlistItem(ctx.guildId, ownerKey, symbol, ctx.message.author.id)
+			: await removeWatchlistItem(ctx.guildId, ownerKey, symbol);
+		if (!result.ok) return JSON.stringify({ error: result.error });
+		return JSON.stringify({ ok: true, action, symbol: result.symbol, name: 'name' in result ? result.name : undefined, scope: ownerKey === '' ? 'guild' : 'personal' });
 	},
 
 	async set_reminder(input, ctx) {
