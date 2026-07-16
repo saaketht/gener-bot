@@ -11,7 +11,6 @@ Slash commands:
 - /user — view your Discord profile info
 - /avatar — display a user's avatar
 - /flight track|list|remove — track real-time flights
-- /ticker add|remove|list — (deprecated — use watchlist commands)
 - /ping — check bot latency
 - /server — view server info
 

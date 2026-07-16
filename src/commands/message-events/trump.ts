@@ -62,7 +62,10 @@ function formatCount(n: number): string {
 
 function buildEmbed(post: TruthPost, index: number): EmbedBuilder {
 	const text = stripHtml(post.content);
-	const description = text || '​';
+	// ~40% of posts are media-only (no text), and the Truth Social media CDN
+	// 403s unauthenticated fetches — Discord's image proxy included — so a
+	// media post can never render inline. Link out instead of a blank card.
+	const description = text || `*[media post — view on Truth Social](${post.url})*`;
 	const timestamp = new Date(post.created_at);
 	const stats = [
 		`❤️ ${formatCount(post.favourites_count)}`,
@@ -81,10 +84,6 @@ function buildEmbed(post: TruthPost, index: number): EmbedBuilder {
 		.addFields({ name: 'Stats', value: stats })
 		.setTimestamp(timestamp)
 		.setFooter({ text: `Truth #${index} · Truth Social` });
-
-	if (post.media.length > 0) {
-		embed.setImage(post.media[0].replace('tmtg:', 'tmtg%3A'));
-	}
 
 	return embed;
 }

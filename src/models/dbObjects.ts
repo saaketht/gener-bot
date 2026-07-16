@@ -4,7 +4,6 @@ import { userItems } from './UserItems';
 import { users } from './Users';
 import { trackedFlights } from './TrackedFlights';
 import { userProfiles } from './UserProfiles';
-import { watchedTickers } from './WatchedTickers';
 import { channelHistory } from './ChannelHistory';
 import { reminders } from './Reminders';
 import { watchlistItems } from './WatchlistItems';
@@ -25,7 +24,6 @@ const UserItems = userItems(sequelize);
 const Users = users(sequelize);
 const TrackedFlights = trackedFlights(sequelize);
 const UserProfiles = userProfiles(sequelize);
-const WatchedTickers = watchedTickers(sequelize);
 const ChannelHistory = channelHistory(sequelize);
 const Reminders = reminders(sequelize);
 const WatchlistItems = watchlistItems(sequelize);
@@ -39,10 +37,9 @@ const dbReady = sequelize.sync().then(async () => {
 	// SQLite returns SQLITE_BUSY immediately when another process holds a write
 	// lock (e.g. DB Browser with unwritten changes) — wait up to 5s instead.
 	await sequelize.query('PRAGMA busy_timeout = 5000').catch(() => undefined);
-	// One-shot migration: collapse legacy 'etf' rows into 'stock' (idempotent).
-	// catch: a locked DB must degrade to a warning, not an unhandled rejection.
-	await WatchedTickers.update({ type: 'stock' }, { where: { type: 'etf' } })
-		.catch(err => console.warn('etf→stock migration skipped:', err?.message ?? err));
+	// One-shot cleanup: watched_tickers is fully replaced by watchlist_items.
+	await sequelize.query('DROP TABLE IF EXISTS watched_tickers')
+		.catch(err => console.warn('watched_tickers drop skipped:', err?.message ?? err));
 
 	// One-shot seed: when the watchlist table is brand new, seed the guild list
 	// from observed lookup frequency (top 8 as of Jul 2026 log analysis).
@@ -95,7 +92,6 @@ export {
 	UserItems,
 	TrackedFlights,
 	UserProfiles,
-	WatchedTickers,
 	ChannelHistory,
 	Reminders,
 	WatchlistItems,

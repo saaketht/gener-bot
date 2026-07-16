@@ -80,8 +80,10 @@ const interactionCreateEvent = {
 						components: buildTimeframeRows(symbol, type, range, mode),
 					});
 				}
-				catch (error) {
-					logger.error(`asset timeframe button failed (${interaction.customId})`, { error });
+				catch (error: any) {
+					// 10062 = ack missed Discord's 3s deadline (event loop busy — likely a
+					// concurrent canvas render on the tiny VM); 40060 = double-acknowledged.
+					logger.error(`asset timeframe button failed (${interaction.customId}): ${error?.code ?? ''} ${error?.message ?? error}`);
 				}
 				return;
 			}
@@ -110,8 +112,8 @@ const interactionCreateEvent = {
 					}
 					await interaction.editReply(payload);
 				}
-				catch (error) {
-					logger.error(`db watchlist button failed (${interaction.customId})`, { error });
+				catch (error: any) {
+					logger.error(`db watchlist button failed (${interaction.customId}): ${error?.code ?? ''} ${error?.message ?? error}`);
 				}
 				return;
 			}
@@ -145,8 +147,8 @@ const interactionCreateEvent = {
 					}
 					await interaction.editReply(payload);
 				}
-				catch (error) {
-					logger.error(`watchlist button failed (${interaction.customId})`, { error });
+				catch (error: any) {
+					logger.error(`watchlist button failed (${interaction.customId}): ${error?.code ?? ''} ${error?.message ?? error}`);
 				}
 				return;
 			}
