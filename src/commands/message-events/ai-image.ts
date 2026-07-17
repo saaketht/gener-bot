@@ -35,7 +35,7 @@ const messageEvent: MessageEvent = {
 
 		try {
 			// Show typing indicator
-			await message.channel.sendTyping();
+			await message.channel.sendTyping().catch(() => undefined);
 
 			const response = await grok.images.generate({
 				model: 'grok-imagine-image',

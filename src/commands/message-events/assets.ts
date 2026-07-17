@@ -33,7 +33,7 @@ const messageEvent: MessageEvent = {
 		for (const r of resolved) recordLookup(message.author.id, r.symbol);
 
 		try {
-			if ('sendTyping' in message.channel) await message.channel.sendTyping();
+			if ('sendTyping' in message.channel) await message.channel.sendTyping().catch(() => undefined);
 			const results = await Promise.all(
 				resolved.map(async (r): Promise<{ resolved: ResolvedTicker; price: PriceData } | null> => {
 					const price = await fetchPrice(r);

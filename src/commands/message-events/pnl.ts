@@ -23,7 +23,7 @@ const messageEvent: MessageEvent = {
 			: getTodayDateStr();
 
 		try {
-			if ('sendTyping' in message.channel) await message.channel.sendTyping();
+			if ('sendTyping' in message.channel) await message.channel.sendTyping().catch(() => undefined);
 
 			const csv = await readTradesCSV();
 			const allTrades = parseTradesCSV(csv);

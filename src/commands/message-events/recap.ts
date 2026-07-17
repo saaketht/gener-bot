@@ -27,7 +27,7 @@ function detailButton(dayCount: number): ActionRowBuilder<ButtonBuilder> {
 
 async function handleRecap(message: Message, dayCount: number) {
 	try {
-		if ('sendTyping' in message.channel) await message.channel.sendTyping();
+		if ('sendTyping' in message.channel) await message.channel.sendTyping().catch(() => undefined);
 
 		const csv = await readTradesCSV();
 		const allTrades = parseTradesCSV(csv);
@@ -51,7 +51,7 @@ async function handleRecap(message: Message, dayCount: number) {
 
 async function handleCashFlow(message: Message) {
 	try {
-		if ('sendTyping' in message.channel) await message.channel.sendTyping();
+		if ('sendTyping' in message.channel) await message.channel.sendTyping().catch(() => undefined);
 
 		const raw = await readFile(CASH_FLOW_PATH, 'utf-8');
 		const lines = raw.trim().split('\n').filter(Boolean);

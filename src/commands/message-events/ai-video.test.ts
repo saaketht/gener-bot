@@ -14,7 +14,7 @@ function fakeMessage(content: string, bot = false) {
 		author: { bot, id: '123', username: 'testuser' },
 		channel: {
 			isSendable: () => true,
-			sendTyping: vi.fn(),
+			sendTyping: vi.fn().mockResolvedValue(undefined),
 		},
 		reply: vi.fn(),
 	} as any;

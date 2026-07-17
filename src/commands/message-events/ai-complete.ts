@@ -1259,7 +1259,7 @@ const messageEvent: MessageEvent = {
 
 		try {
 			// Show typing indicator
-			await message.channel.sendTyping();
+			await message.channel.sendTyping().catch(() => undefined);
 
 			const userContextStr = await fetchUserContext(message.author.id);
 
@@ -1371,7 +1371,7 @@ const messageEvent: MessageEvent = {
 				const chunks = chunkText(line);
 				for (const chunk of chunks) {
 					if (abortController.signal.aborted) break;
-					await message.channel.sendTyping();
+					await message.channel.sendTyping().catch(() => undefined);
 					const sent = await message.channel.send(chunk);
 					sentIds.push(sent.id);
 					await new Promise(r => setTimeout(r, 800));

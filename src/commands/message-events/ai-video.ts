@@ -34,7 +34,7 @@ const messageEvent: MessageEvent = {
 		try {
 			// Show typing indicator — video generation takes a while
 			if ('sendTyping' in message.channel) {
-				await message.channel.sendTyping();
+				await message.channel.sendTyping().catch(() => undefined);
 			}
 			const typingInterval = setInterval(() => {
 				if ('sendTyping' in message.channel) {

@@ -57,7 +57,7 @@ const messageEvent: MessageEvent = {
 				await message.reply(USAGE);
 				return;
 			}
-			if ('sendTyping' in message.channel) await message.channel.sendTyping();
+			if ('sendTyping' in message.channel) await message.channel.sendTyping().catch(() => undefined);
 			const ownerKey = sub === 'guild'
 				? ''
 				: (await resolveOwnerList(message.guildId, message.author.id)).ownerKey;

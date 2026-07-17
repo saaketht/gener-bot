@@ -103,7 +103,7 @@ const messageEvent: MessageEvent = {
 		logger.debug(`weather lookup: ${city}`);
 
 		try {
-			if ('sendTyping' in message.channel) await message.channel.sendTyping();
+			if ('sendTyping' in message.channel) await message.channel.sendTyping().catch(() => undefined);
 			const encodedCity = city.replace(/ /g, '+');
 			const fetchOpts = { headers: { 'User-Agent': 'curl/8.0' } };
 			const [raw, asciiText, geoData]: [any, string, any[]] = await Promise.all([
