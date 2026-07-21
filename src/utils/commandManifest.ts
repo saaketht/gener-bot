@@ -17,6 +17,7 @@ Slash commands:
 Message commands (type these in chat):
 - "ai <message>" — talk to me (can also pull up PNL, prices, charts, flights, weather, and images, set reminders, and remember things about users)
 - "remindme <duration> <message>" — ping you after a delay (e.g. remindme 1h30m check oven)
+- "reset" / "new chat" — wipe my memory of this channel's conversation
 - "watchlist" — your watchlist (or the guild's), paginated price card
 - "watchlist add|remove <sym> [guild]" — curate your list, or the shared guild list
 - "ai-image <prompt>" — generate an image

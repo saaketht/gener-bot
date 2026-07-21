@@ -56,8 +56,8 @@ const messageEvent: MessageEvent = {
 						model: 'grok-imagine-video',
 						prompt: prompt,
 						duration: 10,
-						aspect_ratio: '16:9',
-						resolution: '720p',
+						aspect_ratio: '9:16',
+						resolution: '480p',
 					}),
 				});
 

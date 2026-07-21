@@ -268,6 +268,9 @@ const DELETE_WINDOW_MS = 30_000;
 const lastResponse = new Map<string, { sentIds: string[]; userId: string; timestamp: number }>();
 
 const STOP_KEYWORDS = new Set(['stop', 'shut up', 'stfu']);
+// Wipes the channel's conversational memory. Exact-match only — 'forget' is
+// deliberately excluded as too plausible a standalone chat message.
+const RESET_KEYWORDS = new Set(['reset', 'new chat', 'ai reset', 'ai forget']);
 
 function cacheResponse(messageIds: string[], fullText: string) {
 	for (const id of messageIds) {
@@ -1149,6 +1152,11 @@ async function getGrokResponse(
 	if ((response as any).status === 'incomplete') {
 		logger.warn(`grok response incomplete (${JSON.stringify((response as any).incomplete_details)}); answer may be truncated`);
 	}
+	if (!response.output_text) {
+		// Distinguish "spent all tokens reasoning", "ran out of tool rounds", and
+		// "model chose silence" — the user-visible symptom is identical for all three.
+		logger.warn(`grok returned no text; status=${(response as any).status} output types: ${response.output.map((o: any) => o.type).join(',')}`);
+	}
 	const tokens = response.usage as any;
 	logger.info(`tokens used { input: ${tokens?.input_tokens}, output: ${tokens?.output_tokens} }, total: ${(tokens?.input_tokens ?? 0) + (tokens?.output_tokens ?? 0)}`);
 
@@ -1172,6 +1180,19 @@ const messageEvent: MessageEvent = {
 				activeGenerations.delete(channelId);
 				logger.info(`AI output cancelled in ${channelId} by ${message.author.username}`);
 			}
+			return;
+		}
+
+		// "reset" — wipe this channel's chat memory. Clears BOTH layers: the live
+		// buffer and the SQLite row (memory-only would resurrect on next restart).
+		// Open to anyone, like `stop` — it's shared channel state. Also resets
+		// sticky model routing, since that reads the buffer's last assistant turn.
+		if (RESET_KEYWORDS.has(content)) {
+			channelHistory.delete(channelId);
+			ChannelHistory.destroy({ where: { channel_id: channelId } })
+				.catch(err => logger.warn('history reset persist failed:', err));
+			await message.react('🧹').catch(() => undefined);
+			logger.info(`chat history reset in ${channelId} by ${message.author.username}`);
 			return;
 		}
 
@@ -1347,9 +1368,11 @@ const messageEvent: MessageEvent = {
 
 			// Strip any <msg> wrappers BEFORE the empty check — a model that "declines
 			// to respond" can emit tags-only output that is empty once stripped.
+			const preStripLen = completion.length;
 			completion = completion.replace(/<msg\s+from="[^"]*">/gi, '').replace(/<\/msg>/gi, '').trim();
 
 			if (!completion) {
+				logger.warn(`empty completion [${modelUsed}] (${preStripLen} chars pre-strip${preStripLen > 0 ? ' — tags-only output' : ''})`);
 				await message.reply('Unable to generate response.');
 				return;
 			}

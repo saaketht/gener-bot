@@ -60,7 +60,7 @@ function formatCount(n: number): string {
 	return n.toString();
 }
 
-function buildEmbed(post: TruthPost, index: number): EmbedBuilder {
+function buildEmbed(post: TruthPost, index?: number): EmbedBuilder {
 	const text = stripHtml(post.content);
 	// ~40% of posts are media-only (no text), and the Truth Social media CDN
 	// 403s unauthenticated fetches — Discord's image proxy included — so a
@@ -83,7 +83,7 @@ function buildEmbed(post: TruthPost, index: number): EmbedBuilder {
 		.setDescription(description.length > 4096 ? description.slice(0, 4093) + '...' : description)
 		.addFields({ name: 'Stats', value: stats })
 		.setTimestamp(timestamp)
-		.setFooter({ text: `Truth #${index} · Truth Social` });
+		.setFooter({ text: index !== undefined ? `Truth #${index} · Truth Social` : 'Truth Social' });
 
 	return embed;
 }
@@ -130,10 +130,10 @@ export function startTrumpWatcher(client: Client) {
 				return;
 			}
 
-			const fresh: { post: TruthPost; index: number }[] = [];
-			for (let i = 0; i < posts.length; i++) {
-				if (posts[i].id === lastSeenId) break;
-				fresh.push({ post: posts[i], index: i });
+			const fresh: TruthPost[] = [];
+			for (const post of posts) {
+				if (post.id === lastSeenId) break;
+				fresh.push(post);
 			}
 			if (fresh.length === 0) return;
 			lastSeenId = posts[0].id;
@@ -141,8 +141,8 @@ export function startTrumpWatcher(client: Client) {
 			const channel = await client.channels.fetch(channelId);
 			if (!channel?.isSendable()) return;
 			// oldest first, capped per poll
-			for (const { post, index } of fresh.slice(0, WATCH_MAX_PER_POLL).reverse()) {
-				await channel.send({ embeds: [buildEmbed(post, index)] });
+			for (const post of fresh.slice(0, WATCH_MAX_PER_POLL).reverse()) {
+				await channel.send({ embeds: [buildEmbed(post)] });
 			}
 			logger.info(`trump watcher posted ${Math.min(fresh.length, WATCH_MAX_PER_POLL)} new post(s)`);
 		}
