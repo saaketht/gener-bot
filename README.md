@@ -7,14 +7,14 @@
 
 A Discord bot exploring **event-driven architecture**, **third-party API integration**, and **real-time AI** - built with TypeScript and discord.js v14.
 
-Integrates Grok for general AI chat and image generation, Claude for grounded financial chat and a text adventure game engine, real-time flight tracking, live market data, and a persistent SQLite-backed economy system.
+Integrates Grok for general AI chat and image generation, Claude for grounded financial chat, real-time flight tracking, live market data, and a persistent SQLite-backed economy system.
 
 ## Tech Stack
 
 - **TypeScript** with strict type definitions and custom interfaces
 - **discord.js v14** - slash commands, message events, gateway events
 - **Grok** (xAI API) - general AI chat (vision, web search) and image generation
-- **Claude Sonnet 4.6** (Anthropic SDK) - grounded financial AI chat (live-price + web-search tools) and text adventure game narration
+- **Claude Sonnet** (Anthropic SDK) - grounded financial AI chat (live-price + web-search tools)
 - **Sequelize** + SQLite - persistent user economy (balance, shop, inventory) and flight tracking
 - **AeroDataBox** (RapidAPI) - real-time flight status with adaptive polling
 - **Finnhub + Yahoo Finance** - live stock, crypto, and commodity prices with rendered charts (intraday + historical timeframes)
@@ -28,7 +28,6 @@ Integrates Grok for general AI chat and image generation, Claude for grounded fi
 - `/balance`, `/daily`, `/shop` - Persistent economy with SQLite-backed user data, item shop, and inventory
 - `/flight track <number> [date]` - Track a flight with auto-updating status, adaptive polling, and progress bars
 - `/flight list`, `/flight remove` - Manage tracked flights
-- `/adventure` - Start an AI-narrated text adventure in a thread (multiplayer, persistent saves)
 - `/ping`, `/avatar`, `/server`, `/user` - Utility commands
 
 **Message Handlers** - Natural language triggers processed through a plugin-style event pipeline. Each handler implements the `MessageEvent` interface and is loaded dynamically - the bot listens to the message stream and each handler independently decides whether to act.
@@ -49,13 +48,11 @@ src/
 ├── deploy-commands.ts    # Slash command registration with Discord API
 ├── types/                # TypeScript interfaces (Command, DiscordClient, etc.)
 ├── commands/
-│   ├── slash/            # Slash commands (/ping, /balance, /shop, /flight, /adventure)
+│   ├── slash/            # Slash commands (/ping, /balance, /shop, /flight)
 │   └── message-events/   # Message triggers (ai, assets, weather, flight, etc.)
 ├── events/               # Discord gateway events (ready, interactionCreate)
 ├── models/               # Sequelize models (currency, tracked flights), DB init
 ├── embeds/               # Discord embed builders (flight status, utilities)
-├── game/                 # Text adventure engine (GameEngine, LLM narrator, multiplayer)
-├── ui/                   # Game embed builders (health bars, party display)
 ├── utils/                # Logger, rate limiter, dynamic loader, flight API/tracker
 └── interfaces/           # Data type interfaces (Warframe items, FlightData)
 ```
@@ -63,9 +60,8 @@ src/
 ### Design Decisions
 
 - **Dynamic handler loading** - Commands, message events, and gateway events are discovered at runtime via glob patterns (`utils/loader.ts`). Adding a new command means creating a file that implements the `Command` or `MessageEvent` interface, no manual registration or routing needed.
-- **Type-safe handler system** - Custom type definitions for all handler interfaces (`Command`, `MessageEvent`, `DiscordEvent`) with an extended `DiscordClient` type that carries the commands collection, active games map, and database references.
+- **Type-safe handler system** - Custom type definitions for all handler interfaces (`Command`, `MessageEvent`, `DiscordEvent`) with an extended `DiscordClient` type that carries the commands collection and database references.
 - **Adaptive flight polling** - `FlightTracker` adjusts polling intervals based on flight phase (15m pre-departure → 5m taxiing → 3m in-flight → 2m landing), auto-cleans expired flights, and resumes tracking on restart.
-- **AI game engine** - Deterministic systems handle movement, combat, and inventory directly; Claude Sonnet narrates the results. Game state persists to disk and supports multiplayer with turn-based or collaborative modes.
 - **Environment-driven configuration** - AI system prompt, model selection, and all API keys are externalized to `.env`. The bot personality is fully configurable without code changes.
 - **Per-user rate limiting** - In-memory rate limiter with automatic cleanup, applied per-command to prevent API abuse.
 - **Sensitive data redaction** - Winston logger automatically redacts API keys and tokens from log output.

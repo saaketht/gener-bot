@@ -39,7 +39,6 @@ jobs:
             rm -rf built
             npm run build
             npm prune --omit=dev
-            rm -rf data/games/*
             sudo systemctl restart gener-bot
             sleep 3
             sudo systemctl is-active gener-bot
