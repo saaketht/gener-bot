@@ -22,6 +22,7 @@ import { createReminder } from '../../utils/reminders';
 import { fetchFlightStatus } from '../../utils/flightApi';
 import { getFlightTrackingEmbed } from '../../embeds/flight-embeds';
 import { isToolLoopActive, getToolUses } from './toolLoop';
+import { quoteExcerpt, embedsToText, isFinancialEmbed } from '../../utils/replyExcerpt';
 
 const grok = new OpenAI({
 	apiKey: process.env.GROK_API_KEY!,
@@ -213,17 +214,6 @@ function wrapUser(username: string, text: string): string {
 
 function wrapAssistant(text: string): string {
 	return `<msg from="generBot">${text}</msg>`;
-}
-
-// Short, single-line excerpt of a replied-to message, used to point the model at the
-// specific earlier turn a reply refers to. Strips any <msg> wrapper and collapses whitespace.
-function quoteExcerpt(text: string, maxLen = 300): string {
-	const clean = text
-		.replace(/<msg\s+from="[^"]*">/gi, '')
-		.replace(/<\/msg>/gi, '')
-		.replace(/\s+/g, ' ')
-		.trim();
-	return clean.length > maxLen ? clean.slice(0, maxLen) + '…' : clean;
 }
 
 function getChannelHistory(channelId: string): ChatTurn[] {
@@ -1252,7 +1242,8 @@ const messageEvent: MessageEvent = {
 		// responseCache when warm, else the replied-to message's own visible text.
 		let userText = rawUserText;
 		if (referencedMessage) {
-			const refFull = responseCache.get(referencedMessage.id) ?? referencedMessage.content;
+			const refFull = responseCache.get(referencedMessage.id)
+				?? (referencedMessage.content || embedsToText(referencedMessage));
 			const excerpt = quoteExcerpt(refFull);
 			if (excerpt) {
 				const who = referencedMessage.author.id === botId ? 'generBot' : referencedMessage.author.username;
@@ -1262,7 +1253,10 @@ const messageEvent: MessageEvent = {
 
 		const wrappedUserText = wrapUser(message.author.username, userText);
 
-		const explicitFinancial = isFinancialQuery(message.content);
+		// A reply to one of the bot's finance cards is itself a finance signal, so a bare
+		// follow-up ("why is it down?") reaches Claude's grounded path even without a $TICKER.
+		const explicitFinancial = isFinancialQuery(message.content)
+			|| (referencedMessage != null && isFinancialEmbed(referencedMessage));
 		const stickyClaude = !explicitFinancial && lastChannelModel(channelId) === 'claude';
 		const financial = explicitFinancial || stickyClaude;
 		// Financial → Claude when available, otherwise Grok fallback (same finance prompt + tools).
