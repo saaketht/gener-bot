@@ -28,6 +28,7 @@ Message commands (type these in chat):
 - "recap" — 5-day trading recap
 - "recap all" — all-time P/L overview
 - "warframe <query>" — Warframe game data
+- "levels" — SPY premarket/opening-range/prior-day levels + QQQ, VIX, oil (also auto-posted weekdays 9:58 ET)
 - "$<ticker>" — live price card for any symbol (stocks/ETFs, common crypto, commodities)
 - "food <type>" — food/recipe lookup
 - "imagesearch <query>" — image search

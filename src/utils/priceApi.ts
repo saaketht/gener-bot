@@ -545,3 +545,69 @@ export async function getHistory(symbol: string, range: string, type: AssetType,
 	historyCache.set(cacheKey, { data: out, ts: Date.now() });
 	return out;
 }
+
+export interface Bar {
+	t: number;
+	open: number | null;
+	high: number | null;
+	low: number | null;
+	close: number;
+}
+
+export interface BarSeries {
+	symbol: string;
+	bars: Bar[];
+	prev_close?: number;
+	regular_price?: number;
+	regular_time?: number;
+	// Per-day regular-session windows (epoch sec) from meta.tradingPeriods.regular.
+	// Only equities expose this shape; indices/futures return a flat list, so it's
+	// empty for them and callers fall back to a fixed 09:30–16:00 ET window.
+	regular_windows: { start: number; end: number }[];
+}
+
+// Raw 5m bars with pre/post for multi-day level math (market levels post). Same
+// endpoint as fetchYahoo, but keeps per-bar OHLC and the per-day session windows
+// instead of collapsing to a single quote. Uncached — callers run once per post.
+export async function fetchYahooBars(symbol: string, range = '5d'): Promise<BarSeries | null> {
+	try {
+		const res = await fetch(
+			`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol.toUpperCase())}?interval=5m&range=${range}&includePrePost=true`,
+			{ headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15_000) },
+		);
+		if (!res.ok) {
+			logger.warn(`Yahoo bars ${symbol} returned ${res.status}`);
+			return null;
+		}
+		const result = (await res.json())?.chart?.result?.[0];
+		const meta = result?.meta;
+		const ts: number[] | undefined = result?.timestamp;
+		const q = result?.indicators?.quote?.[0];
+		if (!ts || !q?.close) {
+			logger.warn(`Yahoo bars ${symbol} missing series`);
+			return null;
+		}
+		const bars: Bar[] = [];
+		for (let i = 0; i < ts.length; i++) {
+			const c = q.close[i];
+			if (c == null) continue;
+			bars.push({ t: ts[i], open: q.open?.[i] ?? null, high: q.high?.[i] ?? null, low: q.low?.[i] ?? null, close: c });
+		}
+		const reg = meta?.tradingPeriods?.regular;
+		const regular_windows = Array.isArray(reg)
+			? reg.flat().filter((w: any) => w?.start && w?.end).map((w: any) => ({ start: w.start, end: w.end }))
+			: [];
+		return {
+			symbol: symbol.toUpperCase(),
+			bars,
+			prev_close: meta?.previousClose ?? undefined,
+			regular_price: meta?.regularMarketPrice ?? undefined,
+			regular_time: meta?.regularMarketTime ?? undefined,
+			regular_windows,
+		};
+	}
+	catch (e) {
+		logger.warn(`Yahoo bars fetch failed for ${symbol}:`, e);
+		return null;
+	}
+}

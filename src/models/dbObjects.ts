@@ -8,6 +8,7 @@ import { channelHistory } from './ChannelHistory';
 import { reminders } from './Reminders';
 import { watchlistItems } from './WatchlistItems';
 import { lookupStats } from './LookupStats';
+import { botState } from './BotState';
 
 import { join } from 'path';
 
@@ -28,6 +29,7 @@ const ChannelHistory = channelHistory(sequelize);
 const Reminders = reminders(sequelize);
 const WatchlistItems = watchlistItems(sequelize);
 const LookupStats = lookupStats(sequelize);
+const BotState = botState(sequelize);
 // auto-create missing tables at startup. NOT { alter: true } — on SQLite that
 // rebuilds every table via a copy-to-backup dance on each boot, which corrupts
 // autoincrement PKs and crashes (see the tetris_scores incident). Add columns to
@@ -96,5 +98,6 @@ export {
 	Reminders,
 	WatchlistItems,
 	LookupStats,
+	BotState,
 	dbReady,
 };

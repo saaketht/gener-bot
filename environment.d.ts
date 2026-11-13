@@ -36,6 +36,8 @@ declare global {
             PNL_ALLOWED_USER_IDS?: string;
             // Channel ID for auto-posting new Truth Social posts. Unset = no watching.
             TRUMP_WATCH_CHANNEL_ID?: string;
+            // Channel ID for the weekday 09:58 ET market-levels post. Unset = no post.
+            LEVELS_CHANNEL_ID?: string;
         }
     }
 }

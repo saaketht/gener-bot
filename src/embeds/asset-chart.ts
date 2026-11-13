@@ -232,7 +232,12 @@ function cleanSeries(intraday: IntradaySeries): CleanedPoint[] {
 	return pts;
 }
 
-export function renderAssetChart(price: PriceData, type: AssetType, displayName?: string, mode: ChartMode = 'line'): Buffer | null {
+// Extra dashed horizontal reference lines (market levels post: PMH/PML, OR, PDH/PDL).
+export interface ChartLevel { label: string; value: number; color?: string }
+
+export function renderAssetChart(
+	price: PriceData, type: AssetType, displayName?: string, mode: ChartMode = 'line', levels: ChartLevel[] = [],
+): Buffer | null {
 	if (!price.intraday) return null;
 	const series = cleanSeries(price.intraday);
 	if (series.length < 2) return null;
@@ -351,8 +356,9 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 	const xScale = (t: number) => chartX + ((t - tMin) / span) * chartW;
 
 	const prices = series.map(p => p.price);
-	const yMin = Math.min(...prices, price.prev_close) - 0.2;
-	const yMax = Math.max(...prices, price.prev_close) + 0.2;
+	const levelVals = levels.map(l => l.value);
+	const yMin = Math.min(...prices, price.prev_close, ...levelVals) - 0.2;
+	const yMax = Math.max(...prices, price.prev_close, ...levelVals) + 0.2;
 	const ySpan = Math.max(0.01, yMax - yMin);
 	const yScale = (v: number) => chartY + chartH - ((v - yMin) / ySpan) * chartH;
 
@@ -408,7 +414,25 @@ export function renderAssetChart(price: PriceData, type: AssetType, displayName?
 	// Label sits above the line, but drops below it when the line is near the panel
 	// top (a down day) so it doesn't collide with the fundamentals strip above.
 	const prevLabelY = py - 4 < chartY + 14 ? py + 13 : py - 4;
-	ctx.fillText(`prev $${fmtPrice(price.prev_close)}`, chartX + 6, prevLabelY);
+	const prevText = `prev $${fmtPrice(price.prev_close)}`;
+	ctx.fillText(prevText, chartX + 6, prevLabelY);
+
+	// Level lines, labeled at the left edge. A label within 12px of the previous
+	// one (sorted top-down) shifts right of it instead of overprinting.
+	let lastLabel = { y: prevLabelY, right: chartX + 6 + ctx.measureText(prevText).width };
+	for (const lv of [...levels].sort((a, b) => b.value - a.value)) {
+		const y = yScale(lv.value);
+		ctx.strokeStyle = lv.color ?? COLORS.prevLine;
+		ctx.setLineDash([2, 5]);
+		hLine(y);
+		ctx.setLineDash([]);
+		const text = `${lv.label} ${fmtPrice(lv.value)}`;
+		const ly = y - 4 < chartY + 14 ? y + 13 : y - 4;
+		const lx = Math.abs(ly - lastLabel.y) < 12 ? lastLabel.right + 8 : chartX + 6;
+		ctx.fillStyle = lv.color ?? COLORS.dim;
+		ctx.fillText(text, lx, ly);
+		lastLabel = { y: ly, right: lx + ctx.measureText(text).width };
+	}
 
 	// Split series into pre / regular / post slices for differentiated styling
 	const preSlice = series.filter(p => p.t <= regStart);

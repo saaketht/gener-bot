@@ -3,6 +3,7 @@ import { DiscordClient } from '../types';
 import { FlightTracker } from '../utils/flightTracker';
 import { startReminderLoop } from '../utils/reminders';
 import { startTrumpWatcher } from '../commands/message-events/trump';
+import { startLevelsWatcher } from '../commands/message-events/levels';
 import logger from '../utils/logger';
 
 const readyEvent = {
@@ -28,6 +29,7 @@ const readyEvent = {
 		try {
 			startReminderLoop(client);
 			startTrumpWatcher(client);
+			startLevelsWatcher(client);
 		}
 		catch (error) {
 			logger.error('Failed to start background watchers', { error });
