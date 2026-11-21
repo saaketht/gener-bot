@@ -30,15 +30,19 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 25m
           script: |
+            set -e
             cd ~/gener-bot
             git fetch origin main
             git reset --hard origin/main
-            rm -rf node_modules
             npm ci
             rm -rf built
             npm run build
             npm prune --omit=dev
+            before=$(systemctl show gener-bot -p NRestarts --value)
             sudo systemctl restart gener-bot
-            sleep 3
+            sleep 15
+            # Restart=always masks crash loops from a bare is-active; fail if systemd auto-restarted it since
             sudo systemctl is-active gener-bot
+            test "$(systemctl show gener-bot -p NRestarts --value)" = "$before" || { journalctl -u gener-bot -n 30 --no-pager; exit 1; }
