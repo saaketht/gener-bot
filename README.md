@@ -24,7 +24,7 @@ Integrates Grok for general AI chat and image generation, Claude for grounded fi
 
 ## Features
 
-**Slash Commands** - Discord's native interaction system, registered via the API
+**Slash Commands** - Discord's native interaction system, registered via API
 - `/balance`, `/daily`, `/shop` - Persistent economy with SQLite-backed user data, item shop, and inventory
 - `/flight track <number> [date]` - Track a flight with auto-updating status, adaptive polling, and progress bars
 - `/flight list`, `/flight remove` - Manage tracked flights
